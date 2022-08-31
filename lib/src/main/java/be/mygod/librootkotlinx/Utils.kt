@@ -4,6 +4,7 @@ package be.mygod.librootkotlinx
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.os.Build
 import android.os.Parcel
 import android.os.Parcelable
 import android.system.ErrnoException
@@ -249,7 +250,9 @@ inline fun <reified T : Parcelable> ByteArray.toParcelable(classLoader: ClassLoa
     useParcel { p ->
         p.unmarshall(this, 0, size)
         p.setDataPosition(0)
-        p.readParcelable<T>(classLoader)
+        if (Build.VERSION.SDK_INT < 33) @Suppress("DEPRECATION") {
+            p.readParcelable(classLoader)
+        } else p.readParcelable(classLoader, T::class.java)
     }
 
 // Stream closed caused in NullOutputStream
