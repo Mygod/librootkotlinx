@@ -9,7 +9,10 @@
 Run rooted Kotlin JVM code made super easy with coroutines and parcelize!
 Check out demo at `app` to see just how easy it is.
 Also check out more complicated demos:
-* [VPN Hotspot](https://github.com/Mygod/VPNHotspot)
+* [VPN Hotspot](https://github.com/Mygod/VPNHotspot) (how this library started)
+
+Use it now!
+`be.mygod.librootkotlinx:librootkotlinx:1.0.0`
 
 ## Features
 
