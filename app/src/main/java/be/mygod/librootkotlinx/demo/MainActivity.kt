@@ -22,7 +22,7 @@ class MainActivity : ComponentActivity() {
                 "Got result from root: ${App.rootManager.use { it.execute(GetRoot()) }.value}"
             } catch (e: Exception) {
                 e.printStackTrace()
-                "${e.message}\n${e.stackTraceToString()}"
+                e.stackTraceToString()
             }
         }
     }
