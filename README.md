@@ -9,6 +9,7 @@
 Run rooted Kotlin JVM code made super easy with coroutines and parcelize!
 Check out demo at `app` to see just how easy it is.
 Also check out more complicated demos:
+* [PoGo+LE](https://github.com/Mygod/pogoplusle)
 * [VPN Hotspot](https://github.com/Mygod/VPNHotspot) (how this library started)
 
 Use it now!
@@ -16,7 +17,7 @@ Use it now!
 
 ## Features
 
-* Supports coroutines
+* 100% Kotlin with coroutines and Parcelize! Easy to use and virtually no boilerplate code (no aidl)
 * Persistent root session that closes itself on inactive (optional and configurable)
 * Works around not able to `exec` on certain devices running Android 5-7.1
   (See `RootServer.init#shouldRelocate` if you need this feature)  
