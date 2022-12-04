@@ -243,9 +243,9 @@ class RootServer {
             output.writeParcelable(command)
             output.flush()
         } catch (e: IOException) {
-            if (e.isEBADF) throw CancellationException().initCause(e) else throw e
-        } catch (e: ErrnoException) {
-            if (e.errno == OsConstants.EPIPE) throw CancellationException().initCause(e) else throw e
+            if (e.isEBADF || (e.cause as? ErrnoException)?.errno == OsConstants.EPIPE) {
+                throw CancellationException().initCause(e)
+            } else throw e
         }
         Logger.me.d("Sent #$counter: $command")
         counter++
