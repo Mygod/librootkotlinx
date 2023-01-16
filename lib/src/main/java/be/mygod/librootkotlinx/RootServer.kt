@@ -225,7 +225,7 @@ class RootServer {
                 if (active) throw UnexpectedExitException()
             } catch (e: Throwable) {
                 process.destroy()
-                throw e
+                if (e !is EOFException) throw e
             } finally {
                 Logger.me.d("Waiting for exit")
                 withContext(NonCancellable) { errorReader.await() }
