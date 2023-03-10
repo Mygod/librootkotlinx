@@ -477,8 +477,8 @@ class RootServer {
                                 }
                             };
                             @Suppress("BlockingMethodInNonBlockingContext") {
-                                output.writeByte(CHANNEL_CONSUMED)
                                 output.writeLong(callback)
+                                output.writeByte(CHANNEL_CONSUMED)
                                 output.flush()
                             }
                         } catch (e: Throwable) {
