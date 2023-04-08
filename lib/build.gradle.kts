@@ -23,6 +23,7 @@ android {
 
 dependencies {
     api("androidx.collection:collection-ktx:1.2.0")
+    api("androidx.core:core:1.10.0")
     api("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.6.4")
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test:runner:1.5.2")

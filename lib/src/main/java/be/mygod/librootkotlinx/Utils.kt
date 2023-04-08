@@ -4,16 +4,20 @@ package be.mygod.librootkotlinx
 
 import android.annotation.SuppressLint
 import android.content.Context
-import android.os.Build
 import android.os.Parcel
 import android.os.Parcelable
 import android.system.ErrnoException
 import android.system.OsConstants
-import android.util.*
+import android.util.Size
+import android.util.SizeF
+import android.util.SparseBooleanArray
+import android.util.SparseIntArray
+import android.util.SparseLongArray
 import androidx.annotation.RequiresApi
+import androidx.core.os.ParcelCompat
 import kotlinx.parcelize.Parcelize
 import java.io.IOException
-import java.util.*
+import java.util.Locale
 
 class NoShellException(cause: Throwable) : Exception("Root missing", cause)
 
@@ -250,9 +254,7 @@ inline fun <reified T : Parcelable> ByteArray.toParcelable(classLoader: ClassLoa
     useParcel { p ->
         p.unmarshall(this, 0, size)
         p.setDataPosition(0)
-        if (Build.VERSION.SDK_INT < 33) @Suppress("DEPRECATION") {
-            p.readParcelable(classLoader)
-        } else p.readParcelable(classLoader, T::class.java)
+        ParcelCompat.readParcelable(p, classLoader, T::class.java)
     }
 
 // Stream closed caused in NullOutputStream
