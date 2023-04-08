@@ -360,7 +360,11 @@ class RootServer {
 
         private fun DataInputStream.readSerializable(classLoader: ClassLoader?) =
                 object : ObjectInputStream(ByteArrayInputStream(readByteArray())) {
-                    override fun resolveClass(desc: ObjectStreamClass) = Class.forName(desc.name, false, classLoader)
+                    override fun resolveClass(desc: ObjectStreamClass) = try {
+                        Class.forName(desc.name, false, classLoader)
+                    } catch (e: ClassNotFoundException) {
+                        throw ClassNotFoundException("$desc, $classLoader", e)
+                    }
                 }.readObject()
 
         @JvmStatic
