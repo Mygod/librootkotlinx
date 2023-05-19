@@ -25,7 +25,7 @@ android {
 
 dependencies {
     implementation(project(":lib"))
-    implementation("androidx.activity:activity:1.7.0")
+    implementation("androidx.activity:activity:1.7.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.6.1")
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test:runner:1.5.2")
