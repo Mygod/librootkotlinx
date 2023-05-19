@@ -23,6 +23,7 @@ class RootServer {
         var active = true
 
         abstract fun cancel()
+        abstract fun error(e: Throwable)
         abstract fun shouldRemove(result: Byte): Boolean
         abstract operator fun invoke(input: DataInputStream, result: Byte)
         fun sendClosed() = server.execute(CancelCommand(index))
@@ -58,6 +59,9 @@ class RootServer {
         class Ordinary(server: RootServer, index: Long, classLoader: ClassLoader?,
                        private val callback: CompletableDeferred<Parcelable?>) : Callback(server, index, classLoader) {
             override fun cancel() = callback.cancel()
+            override fun error(e: Throwable) {
+                callback.completeExceptionally(e)
+            }
             override fun shouldRemove(result: Byte) = true
             override fun invoke(input: DataInputStream, result: Byte) {
                 if (result.toInt() == SUCCESS) callback.complete(input.readParcelable(classLoader))
@@ -69,6 +73,9 @@ class RootServer {
                       private val channel: SendChannel<Parcelable?>) : Callback(server, index, classLoader) {
             val finish: CompletableDeferred<Unit> = CompletableDeferred()
             override fun cancel() = finish.cancel()
+            override fun error(e: Throwable) {
+                finish.completeExceptionally(e)
+            }
             override fun shouldRemove(result: Byte) = result.toInt() != SUCCESS
             override fun invoke(input: DataInputStream, result: Byte) {
                 when (result.toInt()) {
@@ -202,7 +209,7 @@ class RootServer {
                 Logger.me.d("Received callback #$index: $result")
                 callback(input, result)
             } catch (e: Throwable) {
-                callback.cancel()
+                callback.error(e)
                 throw e
             }
         }
@@ -225,10 +232,12 @@ class RootServer {
                     process.errorStream.bufferedReader().forEachLine(Logger.me::w)
                 } catch (_: IOException) { }
             }
+            var cause: Throwable? = null
             try {
                 callbackSpin()
                 if (active) throw UnexpectedExitException()
             } catch (e: Throwable) {
+                cause = e
                 Logger.me.d("Shutting down from worker due to error", e)
                 process.destroy()
                 if (e !is EOFException) throw e
@@ -236,7 +245,7 @@ class RootServer {
                 Logger.me.d("Waiting for exit")
                 withContext(NonCancellable) { errorReader.await() }
                 process.waitFor()
-                closeInternal()
+                closeInternal(cause)
             }
         }
     }
@@ -312,7 +321,7 @@ class RootServer {
         }
     }
 
-    private fun closeInternal() = synchronized(callbackLookup) {
+    private fun closeInternal(cause: Throwable? = null) = synchronized(callbackLookup) {
         if (active) {
             active = false
             try {
@@ -325,7 +334,7 @@ class RootServer {
             }
             Logger.me.d("Client closed")
         }
-        for (callback in callbackLookup.valueIterator()) callback.cancel()
+        for (callback in callbackLookup.valueIterator()) if (cause != null) callback.error(cause) else callback.cancel()
         callbackLookup.clear()
     }
     /**
