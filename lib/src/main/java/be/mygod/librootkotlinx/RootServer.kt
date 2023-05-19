@@ -198,8 +198,13 @@ class RootServer {
                     }
                 } else null
             } ?: break
-            Logger.me.d("Received callback #$index: $result")
-            callback(input, result)
+            try {
+                Logger.me.d("Received callback #$index: $result")
+                callback(input, result)
+            } catch (e: Throwable) {
+                callback.cancel()
+                throw e
+            }
         }
     }
 
@@ -224,13 +229,14 @@ class RootServer {
                 callbackSpin()
                 if (active) throw UnexpectedExitException()
             } catch (e: Throwable) {
+                Logger.me.d("Shutting down from worker due to error", e)
                 process.destroy()
                 if (e !is EOFException) throw e
             } finally {
                 Logger.me.d("Waiting for exit")
                 withContext(NonCancellable) { errorReader.await() }
                 process.waitFor()
-                closeInternal(true)
+                closeInternal()
             }
         }
     }
@@ -306,10 +312,9 @@ class RootServer {
         }
     }
 
-    private fun closeInternal(fromWorker: Boolean = false) = synchronized(callbackLookup) {
+    private fun closeInternal() = synchronized(callbackLookup) {
         if (active) {
             active = false
-            Logger.me.d(if (fromWorker) "Shutting down from worker" else "Shutting down from client")
             try {
                 sendLocked(Shutdown())
                 output.close()
@@ -320,15 +325,14 @@ class RootServer {
             }
             Logger.me.d("Client closed")
         }
-        if (fromWorker) {
-            for (callback in callbackLookup.valueIterator()) callback.cancel()
-            callbackLookup.clear()
-        }
+        for (callback in callbackLookup.valueIterator()) callback.cancel()
+        callbackLookup.clear()
     }
     /**
      * Shutdown the instance gracefully.
      */
     suspend fun close() {
+        Logger.me.d("Shutting down from client")
         closeInternal()
         val callbackListenerExit = callbackListenerExit ?: return
         try {
