@@ -13,7 +13,8 @@ Also check out more complicated demos:
 * [VPN Hotspot](https://github.com/Mygod/VPNHotspot) (how this library started)
 
 Use it now!
-`be.mygod.librootkotlinx:librootkotlinx:1.0.3`
+`be.mygod.librootkotlinx:librootkotlinx:1.0.4+`
+(see Releases page for latest version)
 
 ## Features
 
