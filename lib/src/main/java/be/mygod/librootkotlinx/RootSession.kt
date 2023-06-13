@@ -57,6 +57,7 @@ abstract class RootSession {
         timeoutJob = GlobalScope.launch(timeoutContext, CoroutineStart.UNDISPATCHED) {
             delay(timeout)
             mutex.withLock {
+                ensureActive()
                 check(usersCount == 0L)
                 timeoutJob = null
                 closeLocked()
