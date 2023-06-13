@@ -6,11 +6,11 @@ plugins {
 
 android {
     namespace = "be.mygod.librootkotlinx.demo"
-    compileSdk = 33
+    compileSdk = 34
     defaultConfig {
         applicationId = "be.mygod.librootkotlinx.demo"
         minSdk = 21
-        targetSdk = 33
+        targetSdk = 34
         versionCode = 1
         versionName = "1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -25,7 +25,7 @@ android {
 
 dependencies {
     implementation(project(":lib"))
-    implementation("androidx.activity:activity:1.7.1")
+    implementation("androidx.activity:activity:1.7.2")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.6.1")
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test:runner:1.5.2")
