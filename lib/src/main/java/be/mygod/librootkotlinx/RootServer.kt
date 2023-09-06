@@ -133,6 +133,8 @@ class RootServer {
     }
     private fun doInit(context: Context, shouldRelocate: Boolean, niceName: String) {
         try {
+            if (AppProcess.hasStartupAgents(context)) Logger.me.w("JVMTI agent is enabled. Please enable the " +
+                    "'Always install with package manager' option in Android Studio.")
             val (reader, writer) = try {
                 process = ProcessBuilder("su").start()
                 val token1 = UUID.randomUUID().toString()
@@ -149,7 +151,9 @@ class RootServer {
             try {
                 val token2 = UUID.randomUUID().toString()
                 writer.writeBytes(if (shouldRelocate) {
-                    val persistence = File(context.codeCacheDir, ".librootkotlinx-uuid")
+                    val persistence = File((if (Build.VERSION.SDK_INT >= 24) {
+                        context.createDeviceProtectedStorageContext()
+                    } else context).codeCacheDir, ".librootkotlinx-uuid")
                     val uuid = context.packageName + '@' + try {
                         persistence.readText()
                     } catch (_: FileNotFoundException) {

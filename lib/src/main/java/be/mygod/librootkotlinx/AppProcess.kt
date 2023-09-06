@@ -1,5 +1,6 @@
 package be.mygod.librootkotlinx
 
+import android.content.Context
 import android.os.Build
 import android.os.Debug
 import androidx.annotation.RequiresApi
@@ -131,4 +132,10 @@ object AppProcess {
         val extraParams = if (niceName != null) " --nice-name=$niceName" else ""
         return "CLASSPATH=$packageCodePath exec $appProcess $debugParams /system/bin$extraParams $clazz"
     }
+
+    /**
+     * See also: https://github.com/topjohnwu/libsu/pull/120
+     */
+    internal fun hasStartupAgents(context: Context) = Build.VERSION.SDK_INT >= 30 &&
+            File(context.codeCacheDir, "startup_agents").isDirectory
 }
