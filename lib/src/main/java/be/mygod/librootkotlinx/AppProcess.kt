@@ -118,12 +118,15 @@ object AppProcess {
     /**
      * Compute the shell script line that exec into the corresponding [clazz].
      * Extra params can be simply appended to the string.
+     *
+     * See also: https://developer.android.com/ndk/guides/wrap-script#debugging_when_using_wrapsh
      */
     fun launchString(packageCodePath: String, clazz: String, appProcess: String, niceName: String? = null): String {
         val debugParams = if (Debug.isDebuggerConnected()) when (Build.VERSION.SDK_INT) {
-            in 29..Int.MAX_VALUE -> "-XjdwpProvider:adbconnection"
+            in 29..Int.MAX_VALUE -> "-XjdwpProvider:adbconnection -XjdwpOptions:suspend=n,server=y"
             28 -> "-XjdwpProvider:adbconnection -XjdwpOptions:suspend=n,server=y -Xcompiler-option --debuggable"
-            else -> "-Xrunjdwp:transport=dt_android_adb,suspend=n,server=y -Xcompiler-option --debuggable"
+            27 -> "-Xrunjdwp:transport=dt_android_adb,suspend=n,server=y -Xcompiler-option --debuggable"
+            else -> ""
         } else ""
         val extraParams = if (niceName != null) " --nice-name=$niceName" else ""
         return "CLASSPATH=$packageCodePath exec $appProcess $debugParams /system/bin$extraParams $clazz"
