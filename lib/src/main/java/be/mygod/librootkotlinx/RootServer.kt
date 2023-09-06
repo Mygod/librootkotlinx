@@ -22,8 +22,7 @@ class RootServer {
                                   protected val classLoader: ClassLoader?) {
         var active = true
 
-        abstract fun cancel()
-        abstract fun error(e: Throwable)
+        abstract fun cancel(e: CancellationException? = null)
         abstract fun shouldRemove(result: Byte): Boolean
         abstract operator fun invoke(input: DataInputStream, result: Byte)
         fun sendClosed() = server.execute(CancelCommand(index))
@@ -58,10 +57,7 @@ class RootServer {
 
         class Ordinary(server: RootServer, index: Long, classLoader: ClassLoader?,
                        private val callback: CompletableDeferred<Parcelable?>) : Callback(server, index, classLoader) {
-            override fun cancel() = callback.cancel()
-            override fun error(e: Throwable) {
-                callback.completeExceptionally(e)
-            }
+            override fun cancel(e: CancellationException?) = callback.cancel(e)
             override fun shouldRemove(result: Byte) = true
             override fun invoke(input: DataInputStream, result: Byte) {
                 if (result.toInt() == SUCCESS) callback.complete(input.readParcelable(classLoader))
@@ -72,10 +68,7 @@ class RootServer {
         class Channel(server: RootServer, index: Long, classLoader: ClassLoader?,
                       private val channel: SendChannel<Parcelable?>) : Callback(server, index, classLoader) {
             val finish: CompletableDeferred<Unit> = CompletableDeferred()
-            override fun cancel() = finish.cancel()
-            override fun error(e: Throwable) {
-                finish.completeExceptionally(e)
-            }
+            override fun cancel(e: CancellationException?) = finish.cancel(e)
             override fun shouldRemove(result: Byte) = result.toInt() != SUCCESS
             override fun invoke(input: DataInputStream, result: Byte) {
                 when (result.toInt()) {
@@ -209,7 +202,7 @@ class RootServer {
                 Logger.me.d("Received callback #$index: $result")
                 callback(input, result)
             } catch (e: Throwable) {
-                callback.error(e)
+                callback.cancel(if (e is CancellationException) e else CancellationException().apply { initCause(e) })
                 throw e
             }
         }
@@ -334,7 +327,8 @@ class RootServer {
             }
             Logger.me.d("Client closed")
         }
-        for (callback in callbackLookup.valueIterator()) if (cause != null) callback.error(cause) else callback.cancel()
+        for (callback in callbackLookup.valueIterator()) callback.cancel(
+            if (cause is CancellationException) cause else CancellationException().apply { initCause(cause) })
         callbackLookup.clear()
     }
     /**
