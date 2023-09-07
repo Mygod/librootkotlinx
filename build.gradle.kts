@@ -1,13 +1,13 @@
 plugins {
-    val androidGradleVersion = "8.0.2"
+    val androidGradleVersion = "8.1.1"
     id("com.android.application") version androidGradleVersion apply false
     id("com.android.library") version androidGradleVersion apply false
-    id("com.github.ben-manes.versions") version "0.46.0"
-    id("org.jetbrains.kotlin.android") version "1.8.21" apply false
+    id("com.github.ben-manes.versions") version "0.47.0"
+    id("org.jetbrains.kotlin.android") version "1.9.10" apply false
 }
 
 buildscript {
     dependencies {
-        classpath("com.vanniktech:gradle-maven-publish-plugin:0.25.2")
+        classpath("com.vanniktech:gradle-maven-publish-plugin:0.25.3")
     }
 }
