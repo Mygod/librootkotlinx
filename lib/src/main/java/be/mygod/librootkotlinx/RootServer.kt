@@ -10,10 +10,48 @@ import android.system.Os
 import android.system.OsConstants
 import androidx.collection.LongSparseArray
 import androidx.collection.valueIterator
-import kotlinx.coroutines.*
-import kotlinx.coroutines.channels.*
-import java.io.*
-import java.util.*
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.ClosedSendChannelException
+import kotlinx.coroutines.channels.SendChannel
+import kotlinx.coroutines.channels.consumeEach
+import kotlinx.coroutines.channels.onClosed
+import kotlinx.coroutines.channels.onFailure
+import kotlinx.coroutines.channels.produce
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
+import java.io.BufferedReader
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.io.DataInputStream
+import java.io.DataOutputStream
+import java.io.EOFException
+import java.io.File
+import java.io.FileDescriptor
+import java.io.FileNotFoundException
+import java.io.FileOutputStream
+import java.io.IOException
+import java.io.NotSerializableException
+import java.io.ObjectInputStream
+import java.io.ObjectOutputStream
+import java.io.ObjectStreamClass
+import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import kotlin.system.exitProcess
 
@@ -131,10 +169,9 @@ class RootServer {
             Logger.me.w(line)
         }
     }
-    private fun doInit(context: Context, shouldRelocate: Boolean, niceName: String) {
+    private fun doInit(context: Context, shouldRelocate: Boolean, niceName: String,
+                       appProcess: String = AppProcess.myExe) {
         try {
-            if (AppProcess.hasStartupAgents(context)) Logger.me.w("JVMTI agent is enabled. Please enable the " +
-                    "'Always install with package manager' option in Android Studio.")
             val (reader, writer) = try {
                 process = ProcessBuilder("su").start()
                 val token1 = UUID.randomUUID().toString()
@@ -164,12 +201,19 @@ class RootServer {
                         relocated, niceName) + " $token2")
                     script.toString()
                 } else {
-                    AppProcess.launchString(context.packageCodePath, RootServer::class.java.name, AppProcess.myExe,
+                    AppProcess.launchString(context.packageCodePath, RootServer::class.java.name, appProcess,
                         niceName) + " $token2\n"
                 })
                 writer.flush()
                 reader.lookForToken(token2) // wait for ready signal
             } catch (e: Exception) {
+                if (appProcess == AppProcess.myExe && e is EOFException) try {
+                    doInit(context, shouldRelocate, niceName, AppProcess.myExeCanonical)
+                    Logger.me.d("Launched from fallback mode", e)
+                    return
+                } catch (e2: Exception) {
+                    throw e2.apply { addSuppressed(e) }
+                }
                 throw LaunchException(e)
             }
             output = writer
@@ -222,6 +266,8 @@ class RootServer {
     @OptIn(DelicateCoroutinesApi::class)
     suspend fun init(context: Context, shouldRelocate: Boolean = false,
                      niceName: String = "${context.packageName}:root") {
+        if (AppProcess.hasStartupAgents(context)) Logger.me.w("JVMTI agent is enabled. Please enable the " +
+                "'Always install with package manager' option in Android Studio.")
         withContext(Dispatchers.IO) { doInit(context, shouldRelocate, niceName) }
         callbackListenerExit = GlobalScope.async(Dispatchers.IO) {
             val errorReader = async(Dispatchers.IO) {

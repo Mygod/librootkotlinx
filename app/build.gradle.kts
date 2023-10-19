@@ -28,11 +28,12 @@ android {
             proguardFiles(getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro")
         }
     }
+    buildFeatures.buildConfig = true
 }
 
 dependencies {
     implementation(project(":lib"))
-    implementation("androidx.activity:activity:1.7.2")
+    implementation("androidx.activity:activity:1.8.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.6.2")
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test:runner:1.5.2")

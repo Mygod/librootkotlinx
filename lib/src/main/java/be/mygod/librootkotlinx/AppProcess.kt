@@ -3,6 +3,7 @@ package be.mygod.librootkotlinx
 import android.content.Context
 import android.os.Build
 import android.os.Debug
+import android.system.Os
 import androidx.annotation.RequiresApi
 import java.io.File
 import java.io.IOException
@@ -63,21 +64,20 @@ object AppProcess {
         throw IllegalArgumentException("No valid linker section found")
     }
 
-    val myExe get() = try {
+    val myExe get() = "/proc/${Os.getpid()}/exe"
+    val myExeCanonical get() = try {
         File("/proc/self/exe").canonicalPath.also { require(!it.startsWith("/proc/")) { it } }
     } catch (e: Exception) {
-        Logger.me.i("warning: couldn't resolve self exe", e)
+        Logger.me.d("warning: couldn't resolve self exe", e)
         "/system/bin/app_process"
     }
-    @Deprecated("myExe is now always canonical", ReplaceWith("myExe"))
-    val myExeCanonical get() = myExe
 
     /**
      * Try to guess whether enabling relocation would work best.
      * It seems some Android 5-7 devices give random permission denials without relocation.
      * See also VPNHotspot#173.
      */
-    val shouldRelocateHeuristics get() = Build.VERSION.SDK_INT < 26 || myExe.startsWith("/data/")
+    val shouldRelocateHeuristics get() = Build.VERSION.SDK_INT < 26 || myExeCanonical.startsWith("/data/")
 
     /**
      * To workaround Samsung's stupid kernel patch that prevents exec, we need to relocate exe outside of /data.
@@ -98,7 +98,7 @@ object AppProcess {
             val ldConfig = "$apexPath/etc/ld.config.txt"
             val masterLdConfig = genericLdConfigFilePath
             val section = try {
-                File(masterLdConfig).useLines { findLinkerSection(it, myExe) }
+                File(masterLdConfig).useLines { findLinkerSection(it, myExeCanonical) }
             } catch (e: Exception) {
                 Logger.me.w("Failed to locate system section", e)
                 "system"

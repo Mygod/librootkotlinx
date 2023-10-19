@@ -1,8 +1,8 @@
 plugins {
-    val androidGradleVersion = "8.1.1"
+    val androidGradleVersion = "8.1.2"
     id("com.android.application") version androidGradleVersion apply false
     id("com.android.library") version androidGradleVersion apply false
-    id("com.github.ben-manes.versions") version "0.47.0"
+    id("com.github.ben-manes.versions") version "0.49.0"
     id("org.jetbrains.kotlin.android") version "1.9.10" apply false
 }
 
