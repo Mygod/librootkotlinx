@@ -4,6 +4,7 @@ package be.mygod.librootkotlinx
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.res.Resources
 import android.os.Parcel
 import android.os.Parcelable
 import android.system.ErrnoException
@@ -18,6 +19,7 @@ import androidx.core.os.ParcelCompat
 import kotlinx.parcelize.Parcelize
 import java.io.IOException
 import java.util.Locale
+
 
 class NoShellException(cause: Throwable) : Exception("Root missing", cause)
 
@@ -39,7 +41,42 @@ internal val vndkVersion by lazy {
             "ro.vndk.version", "") as String
 }
 
+/**
+ * Calling many system APIs can crash on some LG ROMs. Override the system resources object to prevent crashing.
+ * https://github.com/topjohnwu/libsu/blob/78c60dcecb9ac2047704324e161659a2ddb0f034/service/src/main/java/com/topjohnwu/superuser/internal/RootServerMain.java#L165
+ */
+private val patchLgeIfNeeded by lazy {
+    try {
+        // This class only exists on LG ROMs with broken implementations
+        Class.forName("com.lge.systemservice.core.integrity.IntegrityManager")
+    } catch (_: ClassNotFoundException) {
+        return@lazy
+    }
+    try {
+        // If control flow goes here, we need the resource hack
+        val res = Resources.getSystem()
+        Resources::class.java.getDeclaredField("mSystem").apply {
+            isAccessible = true
+        }.set(null, object : Resources(res.assets, res.displayMetrics, res.configuration) {
+            init {
+                val getImpl = Resources::class.java.getDeclaredMethod("getImpl").apply { isAccessible = true }
+                Resources::class.java.getDeclaredMethod("setImpl", getImpl.returnType).apply {
+                    isAccessible = true
+                }(this, getImpl(res))
+            }
+
+            override fun getBoolean(id: Int) = try {
+                super.getBoolean(id)
+            } catch (e: NotFoundException) {
+                false
+            }
+        })
+    } catch (e: ReflectiveOperationException) {
+        Logger.me.w("Failed to patch system resources", e)
+    }
+}
 val systemContext by lazy {
+    patchLgeIfNeeded
     val classActivityThread = Class.forName("android.app.ActivityThread")
     val activityThread = classActivityThread.getMethod("systemMain").invoke(null)
     classActivityThread.getMethod("getSystemContext").invoke(activityThread) as Context
