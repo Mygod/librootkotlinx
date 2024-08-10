@@ -18,10 +18,25 @@ Use it now!
 
 ## Features
 
-* 100% Kotlin with coroutines and Parcelize! Easy to use and virtually no boilerplate code (no aidl)
+* 100% Kotlin with coroutines and `Parcelize`! Easy to use and virtually no boilerplate code (no aidl)
 * Persistent root session that closes itself on inactive (optional and configurable)
-* Works around not able to `exec` on certain devices running Android 5-7.1
-  (See `RootServer.init#shouldRelocate` if you need this feature)  
+* Supports running native code (API 23+)
+
+## Comparison with [libsu](https://github.com/topjohnwu/libsu)
+
+This project achieves morally the same thing as and ports compatibility code from libsu up to v6.0.0.
+With that said, there are a few differences.
+
+* librootkotlinx supports only API 21+ instead of 19+ for libsu.
+* librootkotlinx is 100% Kotlin and much easier to use with coroutines,
+  whereas libsu uses AIDL which involves heavy boilerplate usages.
+* librootkotlinx is minimal and lightweight as additional features need to be manually enabled.
+* librootkotlinx is more reliable since it minimizes the amount of private APIs used (see listed below).
+  This is possible also because it does not enable all features by default.
+* Out of the box, librootkotlinx is more secure since it uses Unix pipe instead of AIDL for IPC.
+* librootkotlinx works around not able to `exec` on certain devices running API 21-25.
+  (See `RootServer.init#shouldRelocate` if you need this feature.)
+* libsu has some additional features such as remote file system.
 
 ## Private APIs used
 
