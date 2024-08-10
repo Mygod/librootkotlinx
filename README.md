@@ -25,11 +25,13 @@ Use it now!
 
 ## Private APIs used
 
-The following private platform APIs are invoked if you use `shouldRelocate = true` on Android 10+.
+The following private platform APIs are invoked if you use `shouldRelocate = true` on API 29+.
 (So never under normal circumstances.)
 API restrictions are updated up to [SHA-256 checksum `2886a24b6382be8751e86e3c355516c448987c3b0550eb8bb906a34490cfaa3c`](https://dl.google.com/developers/android/tm/non-sdk/hiddenapi-flags.csv).
 
-* `Landroid/os/SystemProperties;->get(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;,sdk,system-api,test-api`
-* `Landroid/os/SystemProperties;->getBoolean(Ljava/lang/String;Z)Z,sdk,system-api,test-api`
-* `Ldalvik/system/VMRuntime;->getCurrentInstructionSet()Ljava/lang/String;,core-platform-api,unsupported`
-* `Ldalvik/system/VMRuntime;->getRuntime()Ldalvik/system/VMRuntime;,core-platform-api,unsupported`
+* (relocated mode, API 29+) `Landroid/os/SystemProperties;->get(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;,sdk,system-api,test-api`
+* (relocated mode, API 29+) `Landroid/os/SystemProperties;->getBoolean(Ljava/lang/String;Z)Z,sdk,system-api,test-api`
+* (for JNI) `Ldalvik/system/BaseDexClassLoader;->pathList:Ldalvik/system/DexPathList;,unsupported`
+* (for JNI) `Ldalvik/system/DexPathList;->nativeLibraryDirectories:Ljava/util/List;,unsupported`
+* (relocated mode, API 29+) `Ldalvik/system/VMRuntime;->getCurrentInstructionSet()Ljava/lang/String;,core-platform-api,unsupported`
+* (relocated mode, API 29+) `Ldalvik/system/VMRuntime;->getRuntime()Ldalvik/system/VMRuntime;,core-platform-api,unsupported`

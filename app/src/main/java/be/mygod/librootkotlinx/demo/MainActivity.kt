@@ -1,11 +1,13 @@
 package be.mygod.librootkotlinx.demo
 
+import android.os.Build
 import android.os.Bundle
 import android.os.Process
 import android.text.method.ScrollingMovementMethod
 import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.lifecycle.lifecycleScope
+import be.mygod.librootkotlinx.JniInit
 import be.mygod.librootkotlinx.ParcelableString
 import be.mygod.librootkotlinx.RootCommand
 import be.mygod.librootkotlinx.RootCommandChannel
@@ -20,16 +22,18 @@ import kotlinx.parcelize.Parcelize
 class MainActivity : ComponentActivity() {
     @Parcelize
     class SimpleTest : RootCommand<ParcelableString> {
-        override suspend fun execute() = ParcelableString("uid: ${Process.myUid()}\n" + withContext(Dispatchers.IO) {
-            // try to execute a restricted subprocess command
-            val process = ProcessBuilder("/system/bin/iptables", "-L", "INPUT").start()
-            var output = process.inputStream.reader().readText()
-            when (val exit = process.waitFor()) {
-                0 -> { }
-                else -> output += "Process exited with $exit".toByteArray()
-            }
-            output
-        })
+        override suspend fun execute() = ParcelableString("uid: " +
+                (if (Build.VERSION.SDK_INT >= 23) Jni.getuid() else Process.myUid()) + "\n" +
+                withContext(Dispatchers.IO) {
+                    // try to execute a restricted subprocess command
+                    val process = ProcessBuilder("/system/bin/iptables", "-L", "INPUT").start()
+                    var output = process.inputStream.reader().readText()
+                    when (val exit = process.waitFor()) {
+                        0 -> { }
+                        else -> output += "Process exited with $exit".toByteArray()
+                    }
+                    output
+                })
     }
 
     @Parcelize
@@ -48,6 +52,8 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             text.text = try {
                 App.rootManager.use {
+                    // it is safe to call this multiple times if you don't feel like remembering in client
+                    if (Build.VERSION.SDK_INT >= 23) it.execute(JniInit())
                     it.execute(SimpleTest()).value + '\n' + it.create(ChannelDemo(), lifecycleScope).toList()
                         .joinToString { it.value }
                 }
