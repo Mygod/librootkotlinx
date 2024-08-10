@@ -130,7 +130,9 @@ object AppProcess {
             else -> ""
         } else ""
         val extraParams = if (niceName != null) " --nice-name=$niceName" else ""
-        return "CLASSPATH=$packageCodePath exec $appProcess $debugParams /system/bin$extraParams $clazz"
+        // https://github.com/topjohnwu/libsu/pull/162
+        return "CLASSPATH=$packageCodePath exec $appProcess $debugParams -Xnoimage-dex2oat /system/bin$extraParams " +
+                clazz
     }
 
     /**
