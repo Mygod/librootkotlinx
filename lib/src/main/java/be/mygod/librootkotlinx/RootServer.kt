@@ -447,7 +447,7 @@ class RootServer {
             }
             val callbackWorker by lazy {
                 mainInitialized.await()
-                Dispatchers.IO.limitedParallelism(1)
+                Dispatchers.IO.limitedParallelism(1, "callbackWorker")
             }
             // access to cancellables shall be wrapped in defaultWorker
             val cancellables = LongSparseArray<() -> Unit>()
