@@ -67,7 +67,8 @@ class RootServer {
         protected fun DataInputStream.readException(result: Byte) = when (result.toInt()) {
             EX_GENERIC -> makeRemoteException(ParcelableThrowable.parseThrowable(readUTF(), classLoader))
             EX_PARCELABLE -> makeRemoteException(readParcelable<Parcelable>(classLoader) as Throwable)
-            EX_SERIALIZABLE -> makeRemoteException(readSerializable(classLoader) as Throwable)
+            EX_SERIALIZABLE -> makeRemoteException(ParcelableThrowable.parseSerializable(readByteArray(), classLoader)
+                    as Throwable)
             else -> throw IllegalArgumentException("Unexpected result $result")
         }
 
@@ -392,9 +393,6 @@ class RootServer {
             writeInt(bytes.size)
             write(bytes)
         }
-
-        private fun DataInputStream.readSerializable(classLoader: ClassLoader?) =
-            ParcelableThrowable.parseSerializable(readByteArray(), classLoader)
 
         @JvmStatic
         fun main(args: Array<String>) {
