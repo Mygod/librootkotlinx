@@ -20,7 +20,6 @@ import kotlinx.parcelize.Parcelize
 import java.io.IOException
 import java.util.Locale
 
-
 class NoShellException(cause: Throwable) : Exception("Root missing", cause)
 
 internal val currentInstructionSet by lazy {

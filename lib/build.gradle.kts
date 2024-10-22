@@ -26,6 +26,6 @@ dependencies {
     api("androidx.core:core:1.10.1")
     api("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.6.4")
     testImplementation("junit:junit:4.13.2")
-    androidTestImplementation("androidx.test:runner:1.6.1")
+    androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
 }
