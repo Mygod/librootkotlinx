@@ -5,7 +5,6 @@ package be.mygod.librootkotlinx
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.res.Resources
-import android.os.BadParcelableException
 import android.os.Parcel
 import android.os.Parcelable
 import android.system.ErrnoException
@@ -290,11 +289,7 @@ fun Parcelable?.toByteArray(parcelableFlags: Int = 0) = useParcel { p ->
 inline fun <reified T : Parcelable> ByteArray.toParcelable(classLoader: ClassLoader?) = useParcel { p ->
     p.unmarshall(this, 0, size)
     p.setDataPosition(0)
-    try {
-        ParcelCompat.readParcelable(p, classLoader, T::class.java)
-    } catch (_: BadParcelableException) {
-        ParcelCompat.readParcelable(p, null, T::class.java)
-    }
+    ParcelCompat.readParcelable(p, classLoader, T::class.java)
 }
 
 // Stream closed caused in NullOutputStream
