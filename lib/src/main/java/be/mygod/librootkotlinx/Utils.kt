@@ -5,6 +5,7 @@ package be.mygod.librootkotlinx
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.res.Resources
+import android.os.BadParcelableException
 import android.os.Parcel
 import android.os.Parcelable
 import android.system.ErrnoException
@@ -286,12 +287,15 @@ fun Parcelable?.toByteArray(parcelableFlags: Int = 0) = useParcel { p ->
     p.writeParcelable(this, parcelableFlags)
     p.marshall()
 }
-inline fun <reified T : Parcelable> ByteArray.toParcelable(classLoader: ClassLoader? = T::class.java.classLoader) =
-    useParcel { p ->
-        p.unmarshall(this, 0, size)
-        p.setDataPosition(0)
+inline fun <reified T : Parcelable> ByteArray.toParcelable(classLoader: ClassLoader?) = useParcel { p ->
+    p.unmarshall(this, 0, size)
+    p.setDataPosition(0)
+    try {
         ParcelCompat.readParcelable(p, classLoader, T::class.java)
+    } catch (_: BadParcelableException) {
+        ParcelCompat.readParcelable(p, null, T::class.java)
     }
+}
 
 // Stream closed caused in NullOutputStream
 val IOException.isEBADF get() = (cause as? ErrnoException)?.errno == OsConstants.EBADF ||

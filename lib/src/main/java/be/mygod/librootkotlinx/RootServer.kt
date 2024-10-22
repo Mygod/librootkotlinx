@@ -65,29 +65,10 @@ class RootServer {
         abstract operator fun invoke(input: DataInputStream, result: Byte)
         fun sendClosed() = server.execute(CancelCommand(index))
 
-        private fun initException(targetClass: Class<*>, message: String): Throwable {
-            @Suppress("NAME_SHADOWING")
-            var targetClass = targetClass
-            while (true) {
-                try {
-                    // try to find a message constructor
-                    return targetClass.getDeclaredConstructor(String::class.java).newInstance(message) as Throwable
-                } catch (_: ReflectiveOperationException) { }
-                targetClass = targetClass.superclass
-            }
-        }
-        private fun makeRemoteException(cause: Throwable, message: String? = null) =
-                if (cause is CancellationException) cause else RemoteException(message).initCause(cause)
+        private fun makeRemoteException(cause: Throwable) =
+                if (cause is CancellationException) cause else RemoteException().initCause(cause)
         protected fun DataInputStream.readException(result: Byte) = when (result.toInt()) {
-            EX_GENERIC -> {
-                val message = readUTF()
-                val name = message.split(':', limit = 2)[0]
-                makeRemoteException(initException(try {
-                    classLoader?.loadClass(name)
-                } catch (_: ClassNotFoundException) {
-                    null
-                } ?: Class.forName(name), message), name)
-            }
+            EX_GENERIC -> makeRemoteException(ParcelableThrowable.parseThrowable(readUTF(), classLoader))
             EX_PARCELABLE -> makeRemoteException(readParcelable<Parcelable>(classLoader) as Throwable)
             EX_SERIALIZABLE -> makeRemoteException(readSerializable(classLoader) as Throwable)
             else -> throw IllegalArgumentException("Unexpected result $result")
@@ -311,8 +292,8 @@ class RootServer {
 
     fun execute(command: RootCommandOneWay) = synchronized(callbackLookup) { if (active) sendLocked(command) }
     @Throws(RemoteException::class)
-    suspend inline fun <reified T : Parcelable?> execute(command: RootCommand<T>) =
-        execute(command, T::class.java.classLoader)
+    suspend inline fun <T : Parcelable?, reified C : RootCommand<T>> execute(command: C) =
+        execute(command, C::class.java.classLoader)
     @Throws(RemoteException::class)
     suspend fun <T : Parcelable?> execute(command: RootCommand<T>, classLoader: ClassLoader?): T {
         val future = CompletableDeferred<T>()
@@ -335,8 +316,8 @@ class RootServer {
 
     @ExperimentalCoroutinesApi
     @Throws(RemoteException::class)
-    inline fun <reified T : Parcelable?> create(command: RootCommandChannel<T>, scope: CoroutineScope) =
-            create(command, scope, T::class.java.classLoader)
+    inline fun <T : Parcelable?, reified C : RootCommandChannel<T>> create(command: C, scope: CoroutineScope) =
+        create(command, scope, C::class.java.classLoader)
     @ExperimentalCoroutinesApi
     @Throws(RemoteException::class)
     fun <T : Parcelable?> create(command: RootCommandChannel<T>, scope: CoroutineScope,
@@ -407,8 +388,8 @@ class RootServer {
 
         private fun DataInputStream.readByteArray() = ByteArray(readInt()).also { readFully(it) }
 
-        private inline fun <reified T : Parcelable> DataInputStream.readParcelable(
-            classLoader: ClassLoader? = T::class.java.classLoader) = readByteArray().toParcelable<T>(classLoader)
+        private inline fun <reified T : Parcelable> DataInputStream.readParcelable(classLoader: ClassLoader?) =
+            readByteArray().toParcelable<T>(classLoader)
         private fun DataOutputStream.writeParcelable(data: Parcelable?, parcelableFlags: Int = 0) {
             val bytes = data.toByteArray(parcelableFlags)
             writeInt(bytes.size)
@@ -420,7 +401,7 @@ class RootServer {
                     override fun resolveClass(desc: ObjectStreamClass) = try {
                         Class.forName(desc.name, false, classLoader)
                     } catch (e: ClassNotFoundException) {
-                        throw ClassNotFoundException("$desc, $classLoader", e)
+                        Class.forName(desc.name, false, RootServer::class.java.classLoader)
                     }
                 }.readObject()
 
