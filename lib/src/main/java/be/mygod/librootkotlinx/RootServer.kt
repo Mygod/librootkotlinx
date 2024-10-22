@@ -86,7 +86,7 @@ class RootServer {
                     classLoader?.loadClass(name)
                 } catch (_: ClassNotFoundException) {
                     null
-                } ?: Class.forName(name), message), message)
+                } ?: Class.forName(name), message), name)
             }
             EX_PARCELABLE -> makeRemoteException(readParcelable<Parcelable>(classLoader) as Throwable)
             EX_SERIALIZABLE -> makeRemoteException(readSerializable(classLoader) as Throwable)
