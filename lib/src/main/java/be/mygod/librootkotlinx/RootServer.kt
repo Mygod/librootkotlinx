@@ -37,7 +37,6 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.BufferedReader
-import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
 import java.io.DataOutputStream
@@ -48,9 +47,7 @@ import java.io.FileNotFoundException
 import java.io.FileOutputStream
 import java.io.IOException
 import java.io.NotSerializableException
-import java.io.ObjectInputStream
 import java.io.ObjectOutputStream
-import java.io.ObjectStreamClass
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import kotlin.system.exitProcess
@@ -397,13 +394,7 @@ class RootServer {
         }
 
         private fun DataInputStream.readSerializable(classLoader: ClassLoader?) =
-                object : ObjectInputStream(ByteArrayInputStream(readByteArray())) {
-                    override fun resolveClass(desc: ObjectStreamClass) = try {
-                        Class.forName(desc.name, false, classLoader)
-                    } catch (e: ClassNotFoundException) {
-                        Class.forName(desc.name, false, RootServer::class.java.classLoader)
-                    }
-                }.readObject()
+            ParcelableThrowable.parseSerializable(readByteArray(), classLoader)
 
         @JvmStatic
         fun main(args: Array<String>) {

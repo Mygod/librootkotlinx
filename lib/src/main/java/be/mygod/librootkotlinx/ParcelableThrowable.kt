@@ -7,6 +7,7 @@ import java.io.ByteArrayOutputStream
 import java.io.NotSerializableException
 import java.io.ObjectInputStream
 import java.io.ObjectOutputStream
+import java.io.ObjectStreamClass
 
 /**
  * More robust Parcelable implementation for Throwable.
@@ -20,7 +21,7 @@ sealed class ParcelableThrowable : Parcelable {
     @Parcelize
     internal data class Serialized(val b: ByteArray) : ParcelableThrowable() {
         override fun unwrap(classLoader: ClassLoader?) = RemoteException().apply {
-            initCause(ObjectInputStream(b.inputStream()).readObject() as Throwable)
+            initCause(parseSerializable(b, classLoader) as Throwable)
         }
     }
 
@@ -34,6 +35,15 @@ sealed class ParcelableThrowable : Parcelable {
     abstract fun unwrap(classLoader: ClassLoader? = ParcelableThrowable::class.java.classLoader): RemoteException
 
     companion object {
+        internal fun parseSerializable(b: ByteArray, classLoader: ClassLoader?) =
+            object : ObjectInputStream(b.inputStream()) {
+                override fun resolveClass(desc: ObjectStreamClass) = try {
+                    Class.forName(desc.name, false, classLoader)
+                } catch (e: ClassNotFoundException) {
+                    Class.forName(desc.name, false, ParcelableThrowable::class.java.classLoader)
+                }
+            }.readObject()
+
         private fun initException(targetClass: Class<*>, message: String): Throwable {
             @Suppress("NAME_SHADOWING")
             var targetClass = targetClass
