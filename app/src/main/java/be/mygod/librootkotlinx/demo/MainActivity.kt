@@ -1,8 +1,6 @@
 package be.mygod.librootkotlinx.demo
 
-import android.os.Build
 import android.os.Bundle
-import android.os.Process
 import android.text.method.ScrollingMovementMethod
 import android.widget.TextView
 import androidx.activity.ComponentActivity
@@ -22,8 +20,7 @@ import kotlinx.parcelize.Parcelize
 class MainActivity : ComponentActivity() {
     @Parcelize
     class SimpleTest : RootCommand<ParcelableString> {
-        override suspend fun execute() = ParcelableString("uid: " +
-                (if (Build.VERSION.SDK_INT >= 23) Jni.getuid() else Process.myUid()) + "\n" +
+        override suspend fun execute() = ParcelableString("uid: " + Jni.getuid() + "\n" +
                 withContext(Dispatchers.IO) {
                     // try to execute a restricted subprocess command
                     val process = ProcessBuilder("/system/bin/iptables", "-L", "INPUT").start()
@@ -53,7 +50,7 @@ class MainActivity : ComponentActivity() {
             text.text = try {
                 App.rootManager.use {
                     // it is safe to call this multiple times if you don't feel like remembering in client
-                    if (Build.VERSION.SDK_INT >= 23) it.execute(JniInit())
+                    it.execute(JniInit())
                     it.execute(SimpleTest()).value + '\n' + it.create(ChannelDemo(), lifecycleScope).toList()
                         .joinToString { it.value }
                 }
