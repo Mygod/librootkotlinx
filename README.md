@@ -36,7 +36,7 @@ With that said, there are a few differences.
 * Out of the box, librootkotlinx is more secure since it uses Unix pipe instead of AIDL for IPC.
 * librootkotlinx works around not able to `exec` on certain devices running API 21-25.
   (See `RootServer.init#shouldRelocate` if you need this feature.)
-* libsu has some additional features such as remote file system.
+* libsu has some additional features such as remote file system and passing `ParcelFileDescriptor` which is not supported out-of-the-box here.
 
 ## Private APIs used
 
