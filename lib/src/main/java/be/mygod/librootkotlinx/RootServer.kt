@@ -30,10 +30,8 @@ import kotlinx.coroutines.channels.produce
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
-import kotlin.time.Duration.Companion.seconds
 
 class RootServer internal constructor() {
     private sealed class Callback(
@@ -136,10 +134,9 @@ class RootServer internal constructor() {
      */
     suspend fun init(context: Context) {
         synchronized(callbackLookup) { require(!active) { "RootServer is already active" } }
-        withTimeout(10.seconds) { withContext(Dispatchers.Main.immediate) { bind(context) } }
+        withContext(Dispatchers.Main.immediate) { bind(context) }
         Logger.me.d("Root server initialized")
     }
-    @OptIn(DelicateCoroutinesApi::class)
     private suspend fun bind(context: Context) = suspendCancellableCoroutine { continuation ->
         var resumed = false
         fun resumeWithFailure(connection: ServiceConnection, throwable: Throwable) {
@@ -207,13 +204,7 @@ class RootServer internal constructor() {
 
         continuation.invokeOnCancellation {
             closeInternal(it)
-            GlobalScope.launch(Dispatchers.Main.immediate) {
-                try {
-                    RootService.unbind(connection)
-                } catch (e: RuntimeException) {
-                    Logger.me.d("Failed to unbind root service connection after coroutine cancellation", e)
-                }
-            }
+            unbindAsync(connection, "Failed to unbind root service connection after coroutine cancellation")
         }
         RootService.bind(Intent(context, RootCommandService::class.java), connection)
     }
@@ -225,7 +216,7 @@ class RootServer internal constructor() {
         try {
             remote.executeOneWay(RootCommandRequest(command))
         } catch (e: RemoteException) {
-            closeInternal(e)
+            closeAfterServiceCallFailure(e)
             throw e
         }
     }
@@ -293,7 +284,7 @@ class RootServer internal constructor() {
                 registered.callback.active = false
             }
             registered.callback.cancel(e.asCancellationException())
-            closeInternal(e)
+            closeAfterServiceCallFailure(e)
             throw e
         }
     }
@@ -316,8 +307,18 @@ class RootServer internal constructor() {
         try {
             remote.cancel(id, callback)
         } catch (e: RemoteException) {
-            closeInternal(e)
+            closeAfterServiceCallFailure(e)
         }
+    }
+
+    private fun closeAfterServiceCallFailure(cause: RemoteException) {
+        val (service, connection) = closeInternal(cause)
+        try {
+            service?.close(callback)
+        } catch (e: RemoteException) {
+            Logger.me.w("Root service close failed after Binder failure", e)
+        }
+        connection?.let { unbindAsync(it, "Root service unbind after Binder failure failed") }
     }
 
     private fun closeInternal(cause: Throwable? = null): Pair<IRootCommandService?, ServiceConnection?> {
@@ -361,12 +362,21 @@ class RootServer internal constructor() {
         }
         connection?.let {
             withContext(Dispatchers.Main.immediate) {
-                try {
-                    RootService.unbind(it)
-                } catch (e: RuntimeException) {
-                    Logger.me.d("Root service unbind failed", e)
-                }
+                unbind(it, "Root service unbind failed")
             }
+        }
+    }
+
+    @OptIn(DelicateCoroutinesApi::class)
+    private fun unbindAsync(connection: ServiceConnection, message: String) {
+        GlobalScope.launch(Dispatchers.Main.immediate) { unbind(connection, message) }
+    }
+
+    private fun unbind(connection: ServiceConnection, message: String) {
+        try {
+            RootService.unbind(connection)
+        } catch (e: RuntimeException) {
+            Logger.me.d(message, e)
         }
     }
 

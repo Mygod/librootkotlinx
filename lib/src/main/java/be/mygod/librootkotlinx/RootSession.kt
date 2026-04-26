@@ -32,28 +32,33 @@ abstract class RootSession {
     private var usersCount = 0L
     private var closePending = false
 
-    private suspend fun ensureServerLocked(): RootServer {
+    suspend fun acquire() = mutex.withLock {
+        haltTimeoutLocked()
+        closePending = false
         server?.let {
-            if (it.active) return it
+            if (it.active) {
+                ++usersCount
+                return@withLock it
+            }
             usersCount = 0
-            closeLocked()
+            withContext(NonCancellable) { closeLocked() }
         }
         check(usersCount == 0L) { "Unexpected $server, $usersCount" }
         val server = RootServer()
         try {
             initServer(server)
             this.server = server
-            return server
+            ++usersCount
+            server
         } catch (e: Throwable) {
             try {
-                server.close()
+                withContext(NonCancellable) { server.close() }
             } catch (eClose: Throwable) {
                 e.addSuppressed(eClose)
             }
             throw e
         }
     }
-
     private suspend fun closeLocked() {
         closePending = false
         val server = server
@@ -76,14 +81,6 @@ abstract class RootSession {
     private fun haltTimeoutLocked() {
         timeoutJob?.cancel()
         timeoutJob = null
-    }
-
-    suspend fun acquire() = withContext(NonCancellable) {
-        mutex.withLock {
-            haltTimeoutLocked()
-            closePending = false
-            ensureServerLocked().also { ++usersCount }
-        }
     }
     suspend fun release(server: RootServer) = withContext(NonCancellable) {
         mutex.withLock {
