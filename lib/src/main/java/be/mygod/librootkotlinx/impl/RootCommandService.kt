@@ -4,7 +4,6 @@ import android.content.Intent
 import android.os.IBinder
 import android.os.Parcelable
 import android.os.RemoteException
-import androidx.collection.LongSparseArray
 import be.mygod.librootkotlinx.Logger
 import be.mygod.librootkotlinx.ParcelableThrowable
 import be.mygod.librootkotlinx.RootCommand
@@ -25,10 +24,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 internal class RootCommandService : RootService() {
+    private data class CommandKey(val callback: IBinder, val id: Long)
+
     private val serviceJob = SupervisorJob()
     private val commandScope = CoroutineScope(Dispatchers.Main.immediate + serviceJob)
     private val callbackDispatcher = Dispatchers.Default.limitedParallelism(1)
-    private val cancellables = LongSparseArray<Job>()
+    private val cancellables = HashMap<CommandKey, Job>()
 
     override fun onBind(intent: Intent): IBinder = binder
 
@@ -43,7 +44,7 @@ internal class RootCommandService : RootService() {
                 is RootCommand<*> -> executeCommand(id, command, callback)
                 is RootCommandChannel<*> -> executeChannel(id, command, callback)
                 else -> commandScope.launch {
-                    callback.sendThrowable(id, IllegalArgumentException("Unrecognized input: $command"))
+                    callback.trySendThrowable(id, IllegalArgumentException("Unrecognized input: $command"))
                 }
             }
         }
@@ -59,34 +60,33 @@ internal class RootCommandService : RootService() {
             }
         }
 
-        override fun cancel(id: Long) {
-            synchronized(this@RootCommandService) { cancellables[id] }?.cancel()
+        override fun cancel(id: Long, callback: IRootCommandCallback) {
+            synchronized(this@RootCommandService) { cancellables[CommandKey(callback.asBinder(), id)] }?.cancel()
         }
 
-        override fun close() {
-            serviceJob.cancel()
-            stopSelf()
-        }
+        override fun close(callback: IRootCommandCallback) = cancel(callback.asBinder())
     }
 
     private fun executeCommand(id: Long, command: RootCommand<*>, callback: IRootCommandCallback) {
+        val commandKey = CommandKey(callback.asBinder(), id)
         val commandJob = Job(serviceJob)
-        synchronized(this) { cancellables.put(id, commandJob) }
+        synchronized(this) { cancellables[commandKey] = commandJob }
         commandScope.launch(commandJob) {
             try {
                 callback.sendResponse(id, RootCommandResponse(RootCommandResponse.SUCCESS, command.execute()))
             } catch (e: Throwable) {
                 if (e is CancellationException && !currentCoroutineContext().isActive) return@launch
-                callback.sendThrowable(id, e)
+                callback.trySendThrowable(id, e)
             } finally {
-                synchronized(this@RootCommandService) { cancellables.remove(id) }
+                synchronized(this@RootCommandService) { cancellables.remove(commandKey) }
             }
         }
     }
 
     private fun executeChannel(id: Long, command: RootCommandChannel<*>, callback: IRootCommandCallback) {
+        val commandKey = CommandKey(callback.asBinder(), id)
         val commandJob = Job(serviceJob)
-        synchronized(this) { cancellables.put(id, commandJob) }
+        synchronized(this) { cancellables[commandKey] = commandJob }
         commandScope.launch(commandJob) {
             try {
                 coroutineScope {
@@ -97,28 +97,36 @@ internal class RootCommandService : RootService() {
                 callback.sendResponse(id, RootCommandResponse(RootCommandResponse.CHANNEL_CONSUMED, null))
             } catch (e: Throwable) {
                 if (e is CancellationException && !currentCoroutineContext().isActive) return@launch
-                callback.sendThrowable(id, e)
+                callback.trySendThrowable(id, e)
             } finally {
-                synchronized(this@RootCommandService) { cancellables.remove(id) }
+                synchronized(this@RootCommandService) { cancellables.remove(commandKey) }
             }
         }
     }
 
-    private suspend fun IRootCommandCallback.sendThrowable(id: Long, throwable: Throwable) {
-        sendResponse(id, if (throwable is Parcelable) {
-            RootCommandResponse(RootCommandResponse.EX_PARCELABLE, throwable)
-        } else {
-            RootCommandResponse(RootCommandResponse.EX_THROWABLE, ParcelableThrowable(throwable))
-        })
+    private fun cancel(callback: IBinder) {
+        val jobs = synchronized(this) {
+            cancellables.entries.asSequence().filter { it.key.callback == callback }.map { it.value }.toList()
+        }
+        for (job in jobs) job.cancel()
+    }
+
+    private suspend fun IRootCommandCallback.trySendThrowable(id: Long, throwable: Throwable) {
+        try {
+            sendResponse(id, if (throwable is Parcelable) {
+                RootCommandResponse(RootCommandResponse.EX_PARCELABLE, throwable)
+            } else {
+                RootCommandResponse(RootCommandResponse.EX_THROWABLE, ParcelableThrowable(throwable))
+            })
+        } catch (e: RemoteException) {
+            Logger.me.d("Failed to deliver root command failure #$id", e)
+            cancel(asBinder())
+        }
     }
 
     private suspend fun IRootCommandCallback.sendResponse(id: Long, response: RootCommandResponse) {
-        try {
-            withContext(callbackDispatcher + NonCancellable) {
-                onResponse(id, response)
-            }
-        } catch (e: RemoteException) {
-            Logger.me.d("Failed to deliver root command response #$id", e)
+        withContext(callbackDispatcher + NonCancellable) {
+            onResponse(id, response)
         }
     }
 }

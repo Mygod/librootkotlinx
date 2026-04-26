@@ -14,18 +14,20 @@ import be.mygod.librootkotlinx.impl.IRootCommandService
 import be.mygod.librootkotlinx.impl.RootCommandRequest
 import be.mygod.librootkotlinx.impl.RootCommandResponse
 import be.mygod.librootkotlinx.impl.RootCommandService
-import com.topjohnwu.superuser.internal.UiThreadHandler
 import com.topjohnwu.superuser.ipc.RootService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ClosedSendChannelException
 import kotlinx.coroutines.channels.SendChannel
 import kotlinx.coroutines.channels.produce
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -33,7 +35,7 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.time.Duration.Companion.seconds
 
-class RootServer {
+class RootServer internal constructor() {
     private sealed class Callback(
         protected val server: RootServer,
         val index: Long,
@@ -137,6 +139,7 @@ class RootServer {
         withTimeout(10.seconds) { withContext(Dispatchers.Main.immediate) { bind(context) } }
         Logger.me.d("Root server initialized")
     }
+    @OptIn(DelicateCoroutinesApi::class)
     private suspend fun bind(context: Context) = suspendCancellableCoroutine { continuation ->
         var resumed = false
         fun resumeWithFailure(connection: ServiceConnection, throwable: Throwable) {
@@ -204,7 +207,7 @@ class RootServer {
 
         continuation.invokeOnCancellation {
             closeInternal(it)
-            UiThreadHandler.run {
+            GlobalScope.launch(Dispatchers.Main.immediate) {
                 try {
                     RootService.unbind(connection)
                 } catch (e: RuntimeException) {
@@ -302,16 +305,16 @@ class RootServer {
         true
     }
 
-    private fun cancelRemote(id: Long, callback: Callback? = null) {
+    private fun cancelRemote(id: Long, commandCallback: Callback? = null) {
         val remote = synchronized(callbackLookup) {
-            if (callback != null && callbackLookup[id] === callback) {
+            if (commandCallback != null && callbackLookup[id] === commandCallback) {
                 callbackLookup.remove(id)
-                callback.active = false
+                commandCallback.active = false
             }
             if (active) service else null
         } ?: return
         try {
-            remote.cancel(id)
+            remote.cancel(id, callback)
         } catch (e: RemoteException) {
             closeInternal(e)
         }
@@ -352,7 +355,7 @@ class RootServer {
         Logger.me.d("Shutting down from client")
         val (service, connection) = closeInternal()
         try {
-            service?.close()
+            service?.close(callback)
         } catch (e: RemoteException) {
             Logger.me.w("Root service close failed", e)
         }
