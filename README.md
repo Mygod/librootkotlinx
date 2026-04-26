@@ -1,6 +1,6 @@
 # librootkotlinx
 
-[![CircleCI](https://circleci.com/gh/Mygod/librootkotlinx.svg?style=shield)](https://circleci.com/gh/Mygod/librootkotlinx)
+[![CI](https://github.com/Mygod/librootkotlinx/actions/workflows/ci.yml/badge.svg)](https://github.com/Mygod/librootkotlinx/actions/workflows/ci.yml)
 [![API](https://img.shields.io/badge/API-19%2B-brightgreen.svg?style=flat)](https://android-arsenal.com/api?level=19)
 [![Language: Kotlin](https://img.shields.io/github/languages/top/Mygod/librootkotlinx.svg)](https://github.com/Mygod/librootkotlinx/search?l=kotlin)
 [![Codacy Badge](https://app.codacy.com/project/badge/Grade/ae00f3cc581f4222a126ffafeeb70987)](https://www.codacy.com/gh/Mygod/librootkotlinx/dashboard?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=Mygod/librootkotlinx&amp;utm_campaign=Badge_Grade)
@@ -30,6 +30,7 @@ It keeps this library's coroutine-oriented `RootCommand` and `RootSession` API w
 You may think of this library as an unofficial `libsu-ktx`.
 
 * librootkotlinx exposes suspend functions and Kotlin Flow instead of requiring consumers to write AIDL.
+* librootkotlinx supports more robust error surfacing and handling than libsu.
 * librootkotlinx depends on `com.github.topjohnwu.libsu:service`, so consumers need the JitPack repository available.
 * libsu has additional APIs such as shell helpers and remote file system support; librootkotlinx intentionally keeps
   those outside its public API.
