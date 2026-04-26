@@ -3,13 +3,16 @@
 package be.mygod.librootkotlinx
 
 import android.annotation.SuppressLint
+import android.os.IBinder
 import android.os.Parcel
 import android.os.Parcelable
 import android.util.Size
 import android.util.SizeF
+import android.util.SparseArray
 import android.util.SparseBooleanArray
 import android.util.SparseIntArray
 import android.util.SparseLongArray
+import androidx.annotation.RequiresApi
 import kotlinx.parcelize.Parcelize
 
 @Parcelize
@@ -34,6 +37,9 @@ data class ParcelableDouble(val value: Double) : Parcelable
 data class ParcelableBoolean(val value: Boolean) : Parcelable
 
 @Parcelize
+data class ParcelableChar(val value: Char) : Parcelable
+
+@Parcelize
 data class ParcelableString(val value: String) : Parcelable
 
 @Parcelize
@@ -43,6 +49,24 @@ data class ParcelableByteArray(val value: ByteArray) : Parcelable {
         if (javaClass != other?.javaClass) return false
 
         other as ParcelableByteArray
+
+        if (!value.contentEquals(other.value)) return false
+
+        return true
+    }
+
+    override fun hashCode(): Int {
+        return value.contentHashCode()
+    }
+}
+
+@Parcelize
+data class ParcelableShortArray(val value: ShortArray) : Parcelable {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (javaClass != other?.javaClass) return false
+
+        other as ParcelableShortArray
 
         if (!value.contentEquals(other.value)) return false
 
@@ -145,6 +169,24 @@ data class ParcelableBooleanArray(val value: BooleanArray) : Parcelable {
 }
 
 @Parcelize
+data class ParcelableCharArray(val value: CharArray) : Parcelable {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (javaClass != other?.javaClass) return false
+
+        other as ParcelableCharArray
+
+        if (!value.contentEquals(other.value)) return false
+
+        return true
+    }
+
+    override fun hashCode(): Int {
+        return value.contentHashCode()
+    }
+}
+
+@Parcelize
 data class ParcelableStringArray(val value: Array<String>) : Parcelable {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -175,12 +217,38 @@ data class ParcelableSparseLongArray(val value: SparseLongArray) : Parcelable
 data class ParcelableSparseBooleanArray(val value: SparseBooleanArray) : Parcelable
 
 @Parcelize
+data class ParcelableSparseArray(val value: SparseArray<Parcelable?>) : Parcelable
+
+@Parcelize
+data class ParcelableBinder(val value: IBinder) : Parcelable
+
+@Parcelize
 data class ParcelableCharSequence(val value: CharSequence) : Parcelable
 
 @Parcelize
+data class ParcelableCharSequenceArray(val value: Array<CharSequence>) : Parcelable {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (javaClass != other?.javaClass) return false
+
+        other as ParcelableCharSequenceArray
+
+        if (!value.contentEquals(other.value)) return false
+
+        return true
+    }
+
+    override fun hashCode(): Int {
+        return value.contentHashCode()
+    }
+}
+
+@Parcelize
+@RequiresApi(21)
 data class ParcelableSize(val value: Size) : Parcelable
 
 @Parcelize
+@RequiresApi(21)
 data class ParcelableSizeF(val value: SizeF) : Parcelable
 
 @Parcelize

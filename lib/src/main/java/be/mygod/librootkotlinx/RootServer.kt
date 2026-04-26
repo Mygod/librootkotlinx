@@ -25,6 +25,7 @@ import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asExecutor
 import kotlinx.coroutines.channels.Channel
@@ -97,10 +98,7 @@ class RootServer internal constructor() {
 
     class UnexpectedExitException : RemoteException("Root service exited unexpectedly")
 
-    @Volatile
-    var active = false
-        private set
-
+    val active get() = synchronized(callbackLookup) { service != null }
     private val callbackLookup = LongSparseArray<Callback>()
     private var counter = 0L
     private var service: IRootCommandService? = null
@@ -137,7 +135,7 @@ class RootServer internal constructor() {
      * @param context Any [Context] from the app.
      */
     suspend fun init(context: Context) {
-        synchronized(callbackLookup) { require(!active) { "RootServer is already active" } }
+        synchronized(callbackLookup) { require(service == null) { "RootServer is already active" } }
         withContext(Dispatchers.Main.immediate) { bind(context) }
         Logger.me.d("Root server initialized")
     }
@@ -188,7 +186,6 @@ class RootServer internal constructor() {
                         service = remote
                         serviceConnection = this
                         serviceBinder = binder
-                        active = true
                         true
                     }
                 }
@@ -259,9 +256,7 @@ class RootServer internal constructor() {
 
     @DelicateCoroutinesApi
     fun execute(command: RootCommandOneWay) {
-        val remote = synchronized(callbackLookup) {
-            if (active) service else null
-        } ?: return
+        val remote = synchronized(callbackLookup) { service } ?: return
         try {
             remote.executeOneWay(RootCommandRequest(command))
         } catch (e: RemoteException) {
@@ -307,7 +302,7 @@ class RootServer internal constructor() {
             @Suppress("UNCHECKED_CAST")
             val registered = registerCallback {
                 Callback.Channel(this@RootServer, it, classLoader, this as SendChannel<Parcelable?>)
-            } ?: return@produce
+            } ?: throw UnexpectedExitException().asCancellationException()
             send(registered, command)
             try {
                 (registered.callback as Callback.Channel).finish.await()
@@ -317,8 +312,7 @@ class RootServer internal constructor() {
         }
 
     private fun registerCallback(factory: (Long) -> Callback) = synchronized(callbackLookup) {
-        val remote = service
-        if (!active || remote == null) return@synchronized null
+        val remote = service ?: return@synchronized null
         val id = counter++
         RegisteredCallback(id, factory(id).also { callbackLookup.put(id, it) }, remote)
     }
@@ -351,7 +345,7 @@ class RootServer internal constructor() {
                 callbackLookup.remove(id)
                 commandCallback.active = false
             }
-            if (active) service else null
+            service
         } ?: return
         try {
             remote.cancel(id, callback)
@@ -376,8 +370,7 @@ class RootServer internal constructor() {
         val snapshot = synchronized(callbackLookup) {
             val snapshot = service to serviceConnection
             binder = serviceBinder
-            if (!active && snapshot.first == null && snapshot.second == null) return@synchronized snapshot
-            active = false
+            if (snapshot.first == null && snapshot.second == null) return@synchronized snapshot
             service = null
             serviceConnection = null
             serviceBinder = null
@@ -410,7 +403,7 @@ class RootServer internal constructor() {
             Logger.me.w("Root service close failed", e)
         }
         connection?.let {
-            withContext(Dispatchers.Main.immediate) {
+            withContext(NonCancellable + Dispatchers.Main.immediate) {
                 unbind(it, "Root service unbind failed")
             }
         }
