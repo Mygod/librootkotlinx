@@ -3,6 +3,7 @@ plugins {
     id("com.android.application") version androidGradleVersion apply false
     id("com.android.library") version androidGradleVersion apply false
     id("com.github.ben-manes.versions") version "0.54.0"
+    id("me.tylerbwong.gradle.metalava") version "0.5.0" apply false
     id("org.jetbrains.kotlin.plugin.parcelize") version "2.3.21" apply false
 }
 

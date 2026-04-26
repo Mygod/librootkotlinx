@@ -45,23 +45,29 @@ sealed class ParcelableThrowable : Parcelable {
             }.readObject()
 
         private fun initException(targetClass: Class<*>, message: String): Throwable {
-            @Suppress("NAME_SHADOWING")
-            var targetClass = targetClass
-            while (true) {
+            var cursor: Class<*>? = targetClass
+            while (cursor != null) {
                 try {
                     // try to find a message constructor
-                    return targetClass.getDeclaredConstructor(String::class.java).newInstance(message) as Throwable
+                    val result = cursor.getDeclaredConstructor(String::class.java).newInstance(message)
+                    if (result is Throwable) return result
                 } catch (_: ReflectiveOperationException) { }
-                targetClass = targetClass.superclass
+                cursor = cursor.superclass
             }
+            return RuntimeException(message)
         }
         internal fun parseThrowable(s: String, classLoader: ClassLoader?): Throwable {
-            val name = s.split(':', limit = 2)[0]
-            return initException(try {
+            val name = s.lineSequence().firstOrNull().orEmpty().substringBefore(':')
+            val targetClass = try {
                 classLoader?.loadClass(name)
             } catch (_: ClassNotFoundException) {
                 null
-            } ?: Class.forName(name), s)
+            } ?: try {
+                Class.forName(name)
+            } catch (_: ClassNotFoundException) {
+                null
+            }
+            return if (targetClass == null) RuntimeException(s) else initException(targetClass, s)
         }
     }
 }

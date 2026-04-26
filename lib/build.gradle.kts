@@ -1,5 +1,6 @@
 plugins {
     id("com.android.library")
+    id("me.tylerbwong.gradle.metalava")
     id("com.vanniktech.maven.publish")
     id("org.jetbrains.kotlin.plugin.parcelize")
 }
@@ -24,6 +25,11 @@ android {
         sourceCompatibility = javaVersion
         targetCompatibility = javaVersion
     }
+}
+
+metalava {
+    filename.set("api/current.txt")
+    arguments.addAll("--stub-packages", "be.mygod.librootkotlinx")
 }
 
 dependencies {

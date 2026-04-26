@@ -8,3 +8,5 @@
 .externalNativeBuild
 androidTest/
 test/
+!lib/src/test/
+!lib/src/test/**

@@ -1,0 +1,323 @@
+// Signature format: 4.0
+package be.mygod.librootkotlinx {
+
+  public interface Logger {
+    method public default void d(String? m, optional Throwable? t);
+    method public default void e(String? m, optional Throwable? t);
+    method @InaccessibleFromKotlin public static be.mygod.librootkotlinx.Logger getMe();
+    method public default void i(String? m, optional Throwable? t);
+    method @InaccessibleFromKotlin public static void setMe(be.mygod.librootkotlinx.Logger);
+    method public default void w(String? m, optional Throwable? t);
+    field public static final be.mygod.librootkotlinx.Logger.Companion Companion;
+  }
+
+  public static final class Logger.Companion {
+    method @InaccessibleFromKotlin public be.mygod.librootkotlinx.Logger getMe();
+    method @InaccessibleFromKotlin public void setMe(be.mygod.librootkotlinx.Logger);
+    property public static be.mygod.librootkotlinx.Logger me;
+  }
+
+  @kotlinx.parcelize.Parcelize public final class ParcelableArray implements android.os.Parcelable {
+    ctor public ParcelableArray(android.os.Parcelable?[] value);
+    method public android.os.Parcelable?[] component1();
+    method public be.mygod.librootkotlinx.ParcelableArray copy(optional android.os.Parcelable?[] value);
+    method @InaccessibleFromKotlin public android.os.Parcelable?[] getValue();
+    property public android.os.Parcelable?[] value;
+  }
+
+  @kotlinx.parcelize.Parcelize public final class ParcelableBinder implements android.os.Parcelable {
+    ctor public ParcelableBinder(android.os.IBinder value);
+    method public android.os.IBinder component1();
+    method public be.mygod.librootkotlinx.ParcelableBinder copy(optional android.os.IBinder value);
+    method @InaccessibleFromKotlin public android.os.IBinder getValue();
+    property public android.os.IBinder value;
+  }
+
+  @kotlinx.parcelize.Parcelize public final class ParcelableBoolean implements android.os.Parcelable {
+    ctor public ParcelableBoolean(boolean value);
+    method public boolean component1();
+    method public be.mygod.librootkotlinx.ParcelableBoolean copy(optional boolean value);
+    method @InaccessibleFromKotlin public boolean getValue();
+    property public boolean value;
+  }
+
+  @kotlinx.parcelize.Parcelize public final class ParcelableBooleanArray implements android.os.Parcelable {
+    ctor public ParcelableBooleanArray(boolean[] value);
+    method public boolean[] component1();
+    method public be.mygod.librootkotlinx.ParcelableBooleanArray copy(optional boolean[] value);
+    method @InaccessibleFromKotlin public boolean[] getValue();
+    property public boolean[] value;
+  }
+
+  @kotlinx.parcelize.Parcelize public final class ParcelableByte implements android.os.Parcelable {
+    ctor public ParcelableByte(byte value);
+    method public byte component1();
+    method public be.mygod.librootkotlinx.ParcelableByte copy(optional byte value);
+    method @InaccessibleFromKotlin public byte getValue();
+    property public byte value;
+  }
+
+  @kotlinx.parcelize.Parcelize public final class ParcelableByteArray implements android.os.Parcelable {
+    ctor public ParcelableByteArray(byte[] value);
+    method public byte[] component1();
+    method public be.mygod.librootkotlinx.ParcelableByteArray copy(optional byte[] value);
+    method @InaccessibleFromKotlin public byte[] getValue();
+    property public byte[] value;
+  }
+
+  @kotlinx.parcelize.Parcelize public final class ParcelableChar implements android.os.Parcelable {
+    ctor public ParcelableChar(char value);
+    method public char component1();
+    method public be.mygod.librootkotlinx.ParcelableChar copy(optional char value);
+    method @InaccessibleFromKotlin public char getValue();
+    property public char value;
+  }
+
+  @kotlinx.parcelize.Parcelize public final class ParcelableCharArray implements android.os.Parcelable {
+    ctor public ParcelableCharArray(char[] value);
+    method public char[] component1();
+    method public be.mygod.librootkotlinx.ParcelableCharArray copy(optional char[] value);
+    method @InaccessibleFromKotlin public char[] getValue();
+    property public char[] value;
+  }
+
+  @kotlinx.parcelize.Parcelize public final class ParcelableCharSequence implements android.os.Parcelable {
+    ctor public ParcelableCharSequence(CharSequence value);
+    method public CharSequence component1();
+    method public be.mygod.librootkotlinx.ParcelableCharSequence copy(optional CharSequence value);
+    method @InaccessibleFromKotlin public CharSequence getValue();
+    property public CharSequence value;
+  }
+
+  @kotlinx.parcelize.Parcelize public final class ParcelableCharSequenceArray implements android.os.Parcelable {
+    ctor public ParcelableCharSequenceArray(CharSequence[] value);
+    method public CharSequence[] component1();
+    method public be.mygod.librootkotlinx.ParcelableCharSequenceArray copy(optional CharSequence[] value);
+    method @InaccessibleFromKotlin public CharSequence[] getValue();
+    property public CharSequence[] value;
+  }
+
+  @kotlinx.parcelize.Parcelize public final class ParcelableDouble implements android.os.Parcelable {
+    ctor public ParcelableDouble(double value);
+    method public double component1();
+    method public be.mygod.librootkotlinx.ParcelableDouble copy(optional double value);
+    method @InaccessibleFromKotlin public double getValue();
+    property public double value;
+  }
+
+  @kotlinx.parcelize.Parcelize public final class ParcelableDoubleArray implements android.os.Parcelable {
+    ctor public ParcelableDoubleArray(double[] value);
+    method public double[] component1();
+    method public be.mygod.librootkotlinx.ParcelableDoubleArray copy(optional double[] value);
+    method @InaccessibleFromKotlin public double[] getValue();
+    property public double[] value;
+  }
+
+  @kotlinx.parcelize.Parcelize public final class ParcelableFloat implements android.os.Parcelable {
+    ctor public ParcelableFloat(float value);
+    method public float component1();
+    method public be.mygod.librootkotlinx.ParcelableFloat copy(optional float value);
+    method @InaccessibleFromKotlin public float getValue();
+    property public float value;
+  }
+
+  @kotlinx.parcelize.Parcelize public final class ParcelableFloatArray implements android.os.Parcelable {
+    ctor public ParcelableFloatArray(float[] value);
+    method public float[] component1();
+    method public be.mygod.librootkotlinx.ParcelableFloatArray copy(optional float[] value);
+    method @InaccessibleFromKotlin public float[] getValue();
+    property public float[] value;
+  }
+
+  @kotlinx.parcelize.Parcelize public final class ParcelableInt implements android.os.Parcelable {
+    ctor public ParcelableInt(int value);
+    method public int component1();
+    method public be.mygod.librootkotlinx.ParcelableInt copy(optional int value);
+    method @InaccessibleFromKotlin public int getValue();
+    property public int value;
+  }
+
+  @kotlinx.parcelize.Parcelize public final class ParcelableIntArray implements android.os.Parcelable {
+    ctor public ParcelableIntArray(int[] value);
+    method public int[] component1();
+    method public be.mygod.librootkotlinx.ParcelableIntArray copy(optional int[] value);
+    method @InaccessibleFromKotlin public int[] getValue();
+    property public int[] value;
+  }
+
+  @kotlinx.parcelize.Parcelize public final class ParcelableList implements android.os.Parcelable {
+    ctor public ParcelableList(java.util.List<? extends android.os.Parcelable?> value);
+    method public java.util.List<android.os.Parcelable?> component1();
+    method public be.mygod.librootkotlinx.ParcelableList copy(optional java.util.List<? extends android.os.Parcelable?> value);
+    method @InaccessibleFromKotlin public java.util.List<android.os.Parcelable?> getValue();
+    property public java.util.List<android.os.Parcelable?> value;
+  }
+
+  @kotlinx.parcelize.Parcelize public final class ParcelableLong implements android.os.Parcelable {
+    ctor public ParcelableLong(long value);
+    method public long component1();
+    method public be.mygod.librootkotlinx.ParcelableLong copy(optional long value);
+    method @InaccessibleFromKotlin public long getValue();
+    property public long value;
+  }
+
+  @kotlinx.parcelize.Parcelize public final class ParcelableLongArray implements android.os.Parcelable {
+    ctor public ParcelableLongArray(long[] value);
+    method public long[] component1();
+    method public be.mygod.librootkotlinx.ParcelableLongArray copy(optional long[] value);
+    method @InaccessibleFromKotlin public long[] getValue();
+    property public long[] value;
+  }
+
+  @kotlinx.parcelize.Parcelize public final class ParcelableShort implements android.os.Parcelable {
+    ctor public ParcelableShort(short value);
+    method public short component1();
+    method public be.mygod.librootkotlinx.ParcelableShort copy(optional short value);
+    method @InaccessibleFromKotlin public short getValue();
+    property public short value;
+  }
+
+  @kotlinx.parcelize.Parcelize public final class ParcelableShortArray implements android.os.Parcelable {
+    ctor public ParcelableShortArray(short[] value);
+    method public short[] component1();
+    method public be.mygod.librootkotlinx.ParcelableShortArray copy(optional short[] value);
+    method @InaccessibleFromKotlin public short[] getValue();
+    property public short[] value;
+  }
+
+  @RequiresApi(21) @kotlinx.parcelize.Parcelize public final class ParcelableSize implements android.os.Parcelable {
+    ctor public ParcelableSize(android.util.Size value);
+    method public android.util.Size component1();
+    method public be.mygod.librootkotlinx.ParcelableSize copy(optional android.util.Size value);
+    method @InaccessibleFromKotlin public android.util.Size getValue();
+    property public android.util.Size value;
+  }
+
+  @RequiresApi(21) @kotlinx.parcelize.Parcelize public final class ParcelableSizeF implements android.os.Parcelable {
+    ctor public ParcelableSizeF(android.util.SizeF value);
+    method public android.util.SizeF component1();
+    method public be.mygod.librootkotlinx.ParcelableSizeF copy(optional android.util.SizeF value);
+    method @InaccessibleFromKotlin public android.util.SizeF getValue();
+    property public android.util.SizeF value;
+  }
+
+  @kotlinx.parcelize.Parcelize public final class ParcelableSparseArray implements android.os.Parcelable {
+    ctor public ParcelableSparseArray(android.util.SparseArray<android.os.Parcelable?> value);
+    method public android.util.SparseArray<android.os.Parcelable?> component1();
+    method public be.mygod.librootkotlinx.ParcelableSparseArray copy(optional android.util.SparseArray<android.os.Parcelable?> value);
+    method @InaccessibleFromKotlin public android.util.SparseArray<android.os.Parcelable?> getValue();
+    property public android.util.SparseArray<android.os.Parcelable?> value;
+  }
+
+  @kotlinx.parcelize.Parcelize public final class ParcelableSparseBooleanArray implements android.os.Parcelable {
+    ctor public ParcelableSparseBooleanArray(android.util.SparseBooleanArray value);
+    method public android.util.SparseBooleanArray component1();
+    method public be.mygod.librootkotlinx.ParcelableSparseBooleanArray copy(optional android.util.SparseBooleanArray value);
+    method @InaccessibleFromKotlin public android.util.SparseBooleanArray getValue();
+    property public android.util.SparseBooleanArray value;
+  }
+
+  @kotlinx.parcelize.Parcelize public final class ParcelableSparseIntArray implements android.os.Parcelable {
+    ctor public ParcelableSparseIntArray(android.util.SparseIntArray value);
+    method public android.util.SparseIntArray component1();
+    method public be.mygod.librootkotlinx.ParcelableSparseIntArray copy(optional android.util.SparseIntArray value);
+    method @InaccessibleFromKotlin public android.util.SparseIntArray getValue();
+    property public android.util.SparseIntArray value;
+  }
+
+  @kotlinx.parcelize.Parcelize public final class ParcelableSparseLongArray implements android.os.Parcelable {
+    ctor public ParcelableSparseLongArray(android.util.SparseLongArray value);
+    method public android.util.SparseLongArray component1();
+    method public be.mygod.librootkotlinx.ParcelableSparseLongArray copy(optional android.util.SparseLongArray value);
+    method @InaccessibleFromKotlin public android.util.SparseLongArray getValue();
+    property public android.util.SparseLongArray value;
+  }
+
+  @kotlinx.parcelize.Parcelize public final class ParcelableString implements android.os.Parcelable {
+    ctor public ParcelableString(String value);
+    method public String component1();
+    method public be.mygod.librootkotlinx.ParcelableString copy(optional String value);
+    method @InaccessibleFromKotlin public String getValue();
+    property public String value;
+  }
+
+  @kotlinx.parcelize.Parcelize public final class ParcelableStringArray implements android.os.Parcelable {
+    ctor public ParcelableStringArray(String[] value);
+    method public String[] component1();
+    method public be.mygod.librootkotlinx.ParcelableStringArray copy(optional String[] value);
+    method @InaccessibleFromKotlin public String[] getValue();
+    property public String[] value;
+  }
+
+  @kotlinx.parcelize.Parcelize public final class ParcelableStringList implements android.os.Parcelable {
+    ctor public ParcelableStringList(java.util.List<java.lang.String> value);
+    method public java.util.List<java.lang.String> component1();
+    method public be.mygod.librootkotlinx.ParcelableStringList copy(optional java.util.List<java.lang.String> value);
+    method @InaccessibleFromKotlin public java.util.List<java.lang.String> getValue();
+    property public java.util.List<java.lang.String> value;
+  }
+
+  public abstract sealed nonexhaustive class ParcelableThrowable implements android.os.Parcelable {
+    method public abstract android.os.RemoteException unwrap(optional ClassLoader? classLoader);
+    field public static final be.mygod.librootkotlinx.ParcelableThrowable.Companion Companion;
+  }
+
+  public static final class ParcelableThrowable.Companion {
+  }
+
+  public final class ParcelableThrowableKt {
+    method public static be.mygod.librootkotlinx.ParcelableThrowable ParcelableThrowable(Throwable t);
+  }
+
+  public interface RootCommand<Result extends android.os.Parcelable> extends android.os.Parcelable {
+    method @MainThread public suspend Object? execute(kotlin.coroutines.Continuation<? super Result>);
+  }
+
+  @kotlinx.coroutines.DelicateCoroutinesApi public interface RootCommandOneWay extends android.os.Parcelable {
+    method @MainThread public suspend Object? execute(kotlin.coroutines.Continuation<? super kotlin.Unit>);
+  }
+
+  public interface RootFlow<T extends android.os.Parcelable> extends android.os.Parcelable {
+    method @MainThread public kotlinx.coroutines.flow.Flow<T> flow();
+  }
+
+  public final class RootServer {
+    method public suspend Object? close(kotlin.coroutines.Continuation<? super kotlin.Unit>);
+    method @kotlin.jvm.Throws(exceptionClasses=RemoteException::class) public suspend <T extends android.os.Parcelable> Object? execute(be.mygod.librootkotlinx.RootCommand<T> command, ClassLoader? classLoader, kotlin.coroutines.Continuation<? super T>) throws android.os.RemoteException;
+    method @kotlinx.coroutines.DelicateCoroutinesApi public void execute(be.mygod.librootkotlinx.RootCommandOneWay command);
+    method @KotlinOnly @kotlin.jvm.Throws(exceptionClasses={android.os.RemoteException.class}) public suspend inline <T extends android.os.Parcelable, reified C extends be.mygod.librootkotlinx.RootCommand<T>> Object? execute(C command, kotlin.coroutines.Continuation<? super T>) throws android.os.RemoteException;
+    method public <T extends android.os.Parcelable> kotlinx.coroutines.flow.Flow<T> flow(be.mygod.librootkotlinx.RootFlow<T> source, ClassLoader? classLoader);
+    method @KotlinOnly public inline <T extends android.os.Parcelable, reified C extends be.mygod.librootkotlinx.RootFlow<T>> kotlinx.coroutines.flow.Flow<T> flow(C source);
+    method @InaccessibleFromKotlin public boolean getActive();
+    method public suspend Object? init(android.content.Context context, kotlin.coroutines.Continuation<? super kotlin.Unit>);
+    property public boolean active;
+    field public static final be.mygod.librootkotlinx.RootServer.Companion Companion;
+  }
+
+  public static final class RootServer.Companion {
+  }
+
+  public static final class RootServer.UnexpectedExitException extends android.os.RemoteException {
+    ctor public RootServer.UnexpectedExitException();
+  }
+
+  public abstract class RootSession {
+    ctor public RootSession();
+    method public final suspend Object? acquire(kotlin.coroutines.Continuation<? super be.mygod.librootkotlinx.RootServer>);
+    method public final suspend Object? closeExisting(kotlin.coroutines.Continuation<? super kotlin.Unit>);
+    method @InaccessibleFromKotlin protected kotlin.coroutines.CoroutineContext getTimeoutContext();
+    method protected abstract suspend Object? initServer(be.mygod.librootkotlinx.RootServer server, kotlin.coroutines.Continuation<? super kotlin.Unit>);
+    method public final suspend Object? release(be.mygod.librootkotlinx.RootServer server, kotlin.coroutines.Continuation<? super kotlin.Unit>);
+    method public final suspend inline <T> Object? use(kotlin.jvm.functions.Function1<? super be.mygod.librootkotlinx.RootServer,? extends T> block, kotlin.coroutines.Continuation<? super T>);
+    property protected kotlin.time.Duration timeout;
+    property protected kotlin.coroutines.CoroutineContext timeoutContext;
+  }
+
+  public final class Utils {
+    method public static inline <T> T useParcel(kotlin.jvm.functions.Function1<? super android.os.Parcel,? extends T> block);
+  }
+
+  public typealias RootCommandNoResult = be.mygod.librootkotlinx.RootCommand<android.os.Parcelable?>;
+
+}
+

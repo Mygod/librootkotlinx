@@ -21,7 +21,7 @@ import kotlin.time.Duration.Companion.minutes
 abstract class RootSession {
     protected abstract suspend fun initServer(server: RootServer)
     /**
-     * Timeout to close [RootServer] in milliseconds.
+     * Timeout to close [RootServer].
      */
     protected open val timeout get() = 5.minutes
     protected open val timeoutContext: CoroutineContext get() = Dispatchers.Default
