@@ -1,10 +1,19 @@
 package be.mygod.librootkotlinx
 
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.withContext
 import kotlin.coroutines.CoroutineContext
+import kotlin.time.Duration.Companion.minutes
 
 /**
  * This object manages creation of [RootServer] and times them out automagically, with default timeout of 5 minutes.
@@ -14,7 +23,7 @@ abstract class RootSession {
     /**
      * Timeout to close [RootServer] in milliseconds.
      */
-    protected open val timeout get() = TimeUnit.MINUTES.toMillis(5)
+    protected open val timeout get() = 5.minutes
     protected open val timeoutContext: CoroutineContext get() = Dispatchers.Default
 
     private val mutex = Mutex()

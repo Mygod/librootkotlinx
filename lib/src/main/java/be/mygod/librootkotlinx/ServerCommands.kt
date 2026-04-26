@@ -5,7 +5,6 @@ import androidx.annotation.MainThread
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
-import kotlinx.parcelize.Parcelize
 
 interface RootCommand<Result : Parcelable?> : Parcelable {
     /**
@@ -37,11 +36,3 @@ interface RootCommandChannel<T : Parcelable?> : Parcelable {
     @MainThread
     fun create(scope: CoroutineScope): ReceiveChannel<T>
 }
-
-@Parcelize
-internal data class CancelCommand(val index: Long) : RootCommandOneWay {
-    override suspend fun execute() = error("Internal implementation")
-}
-
-@Parcelize
-internal class Shutdown : Parcelable

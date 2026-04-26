@@ -3,83 +3,14 @@
 package be.mygod.librootkotlinx
 
 import android.annotation.SuppressLint
-import android.content.Context
-import android.content.res.Resources
 import android.os.Parcel
 import android.os.Parcelable
-import android.system.ErrnoException
-import android.system.OsConstants
 import android.util.Size
 import android.util.SizeF
 import android.util.SparseBooleanArray
 import android.util.SparseIntArray
 import android.util.SparseLongArray
-import androidx.annotation.RequiresApi
-import androidx.core.os.ParcelCompat
 import kotlinx.parcelize.Parcelize
-import java.io.IOException
-import java.util.Locale
-
-class NoShellException(cause: Throwable) : Exception("Root missing", cause)
-
-internal val currentInstructionSet by lazy {
-    val classVMRuntime = Class.forName("dalvik.system.VMRuntime")
-    val runtime = classVMRuntime.getDeclaredMethod("getRuntime").invoke(null)
-    classVMRuntime.getDeclaredMethod("getCurrentInstructionSet").invoke(runtime) as String
-}
-
-private val classSystemProperties by lazy { Class.forName("android.os.SystemProperties") }
-@get:RequiresApi(26)
-internal val isVndkLite by lazy {
-    classSystemProperties.getDeclaredMethod("getBoolean", String::class.java, Boolean::class.java).invoke(null,
-            "ro.vndk.lite", false) as Boolean
-}
-@get:RequiresApi(26)
-internal val vndkVersion by lazy {
-    classSystemProperties.getDeclaredMethod("get", String::class.java, String::class.java).invoke(null,
-            "ro.vndk.version", "") as String
-}
-
-/**
- * Calling many system APIs can crash on some LG ROMs. Override the system resources object to prevent crashing.
- * https://github.com/topjohnwu/libsu/blob/78c60dcecb9ac2047704324e161659a2ddb0f034/service/src/main/java/com/topjohnwu/superuser/internal/RootServerMain.java#L165
- */
-private val patchLgeIfNeeded by lazy {
-    try {
-        // This class only exists on LG ROMs with broken implementations
-        Class.forName("com.lge.systemservice.core.integrity.IntegrityManager")
-    } catch (_: ClassNotFoundException) {
-        return@lazy
-    }
-    try {
-        // If control flow goes here, we need the resource hack
-        val res = Resources.getSystem()
-        Resources::class.java.getDeclaredField("mSystem").apply {
-            isAccessible = true
-        }.set(null, object : Resources(res.assets, res.displayMetrics, res.configuration) {
-            init {
-                val getImpl = Resources::class.java.getDeclaredMethod("getImpl").apply { isAccessible = true }
-                Resources::class.java.getDeclaredMethod("setImpl", getImpl.returnType).apply {
-                    isAccessible = true
-                }(this, getImpl(res))
-            }
-
-            override fun getBoolean(id: Int) = try {
-                super.getBoolean(id)
-            } catch (e: NotFoundException) {
-                false
-            }
-        })
-    } catch (e: ReflectiveOperationException) {
-        Logger.me.w("Failed to patch system resources", e)
-    }
-}
-val systemContext by lazy {
-    patchLgeIfNeeded
-    val classActivityThread = Class.forName("android.app.ActivityThread")
-    val activityThread = classActivityThread.getMethod("systemMain").invoke(null)
-    classActivityThread.getMethod("getSystemContext").invoke(activityThread) as Context
-}
 
 @Parcelize
 data class ParcelableByte(val value: Byte) : Parcelable
@@ -281,17 +212,3 @@ inline fun <T> useParcel(block: (Parcel) -> T) = Parcel.obtain().run {
         recycle()
     }
 }
-
-fun Parcelable?.toByteArray(parcelableFlags: Int = 0) = useParcel { p ->
-    p.writeParcelable(this, parcelableFlags)
-    p.marshall()
-}
-inline fun <reified T : Parcelable> ByteArray.toParcelable(classLoader: ClassLoader?) = useParcel { p ->
-    p.unmarshall(this, 0, size)
-    p.setDataPosition(0)
-    ParcelCompat.readParcelable(p, classLoader, T::class.java)
-}
-
-// Stream closed caused in NullOutputStream
-val IOException.isEBADF get() = (cause as? ErrnoException)?.errno == OsConstants.EBADF ||
-        message?.lowercase(Locale.ENGLISH) == "stream closed"
