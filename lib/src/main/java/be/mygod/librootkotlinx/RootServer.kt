@@ -11,9 +11,12 @@ import androidx.collection.LongSparseArray
 import androidx.collection.valueIterator
 import be.mygod.librootkotlinx.impl.IRootCommandCallback
 import be.mygod.librootkotlinx.impl.IRootCommandService
+import be.mygod.librootkotlinx.impl.PendingRootServiceBind
 import be.mygod.librootkotlinx.impl.RootCommandRequest
 import be.mygod.librootkotlinx.impl.RootCommandResponse
 import be.mygod.librootkotlinx.impl.RootCommandService
+import com.topjohnwu.superuser.NoShellException
+import com.topjohnwu.superuser.Shell
 import com.topjohnwu.superuser.ipc.RootService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -23,6 +26,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.asExecutor
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ClosedSendChannelException
 import kotlinx.coroutines.channels.SendChannel
@@ -137,34 +141,45 @@ class RootServer internal constructor() {
         withContext(Dispatchers.Main.immediate) { bind(context) }
         Logger.me.d("Root server initialized")
     }
+    @OptIn(DelicateCoroutinesApi::class)
     private suspend fun bind(context: Context) = suspendCancellableCoroutine { continuation ->
         var resumed = false
-        fun resumeWithFailure(connection: ServiceConnection, throwable: Throwable) {
-            val shouldResume = synchronized(callbackLookup) {
-                if (resumed) false else {
-                    resumed = true
-                    true
-                }
-            }
-            if (shouldResume) {
-                try {
-                    RootService.unbind(connection)
-                } catch (e: RuntimeException) {
-                    Logger.me.d("Failed to unbind root service connection after bind failure", e)
-                }
-                continuation.resumeWithException(throwable)
-            } else {
-                closeInternal(throwable)
-            }
-        }
-
+        var pendingBind: PendingRootServiceBind? = null
         val connection = object : ServiceConnection {
+            fun resumeWithFailure(throwable: Throwable, clearEnRoute: Boolean = false) {
+                val connection = this
+                GlobalScope.launch(Dispatchers.Main.immediate) {
+                    val (shouldResume, shouldClose) = synchronized(callbackLookup) {
+                        when {
+                            !resumed && continuation.isActive -> {
+                                resumed = true
+                                true to false
+                            }
+                            resumed -> false to (serviceConnection === connection)
+                            else -> false to false
+                        }
+                    }
+                    if (clearEnRoute) {
+                        try {
+                            pendingBind?.cancel()
+                        } catch (e: Throwable) {
+                            if (shouldResume) throwable.addSuppressed(e)
+                            else Logger.me.d("Failed to clean up libsu pending RootService bind after bind failure", e)
+                        }
+                    }
+                    if (shouldResume) {
+                        unbind(connection, "Failed to unbind root service connection after bind failure")
+                        continuation.resumeWithException(throwable)
+                    } else if (shouldClose) closeInternal(throwable)
+                }
+            }
+
             override fun onServiceConnected(name: ComponentName, binder: IBinder) {
                 val remote = IRootCommandService.Stub.asInterface(binder)
                 try {
                     binder.linkToDeath(callback, 0)
                 } catch (e: RemoteException) {
-                    resumeWithFailure(this, e)
+                    resumeWithFailure(e)
                     return
                 }
                 val shouldResume = synchronized(callbackLookup) {
@@ -195,18 +210,51 @@ class RootServer internal constructor() {
                 closeInternal(UnexpectedExitException())
             }
 
-            override fun onBindingDied(name: ComponentName) = resumeWithFailure(this, UnexpectedExitException())
+            override fun onBindingDied(name: ComponentName) = resumeWithFailure(UnexpectedExitException())
 
             override fun onNullBinding(name: ComponentName) {
-                resumeWithFailure(this, IllegalStateException("Root service returned null binding"))
+                resumeWithFailure(IllegalStateException("Root service returned null binding"))
             }
         }
 
-        continuation.invokeOnCancellation {
-            closeInternal(it)
-            unbindAsync(connection, "Failed to unbind root service connection after coroutine cancellation")
+        continuation.invokeOnCancellation { cause ->
+            GlobalScope.launch(Dispatchers.Main.immediate) {
+                closeInternal(cause)
+                unbind(connection, "Failed to unbind root service connection after coroutine cancellation")
+            }
         }
-        RootService.bind(Intent(context, RootCommandService::class.java), connection)
+
+        val intent = Intent(context, RootCommandService::class.java)
+        val pending = try {
+            PendingRootServiceBind(intent, connection)
+        } catch (e: Throwable) {
+            connection.resumeWithFailure(e)
+            return@suspendCancellableCoroutine
+        }
+        pendingBind = pending
+        val task = try {
+            RootService.bindOrTask(
+                intent,
+                Dispatchers.Main.immediate.asExecutor(),
+                connection,
+            )
+        } catch (e: Throwable) {
+            connection.resumeWithFailure(e, clearEnRoute = pending.ownsStartupIfQueued)
+            null
+        }
+        if (task != null) {
+            GlobalScope.launch(Dispatchers.IO) {
+                try {
+                    val shell = Shell.getShell()
+                    if (shell.isRoot) shell.execTask(task) else {
+                        throw NoShellException("Root shell is not available")
+                    }
+                } catch (e: Throwable) {
+                    if (e is CancellationException) return@launch
+                    connection.resumeWithFailure(e, clearEnRoute = true)
+                }
+            }
+        }
     }
 
     fun execute(command: RootCommandOneWay) {

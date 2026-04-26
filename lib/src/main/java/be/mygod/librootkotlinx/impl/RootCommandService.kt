@@ -79,6 +79,7 @@ internal class RootCommandService : RootService() {
                 callback.trySendThrowable(id, e)
             } finally {
                 synchronized(this@RootCommandService) { cancellables.remove(commandKey) }
+                commandJob.complete()
             }
         }
     }
@@ -100,6 +101,7 @@ internal class RootCommandService : RootService() {
                 callback.trySendThrowable(id, e)
             } finally {
                 synchronized(this@RootCommandService) { cancellables.remove(commandKey) }
+                commandJob.complete()
             }
         }
     }

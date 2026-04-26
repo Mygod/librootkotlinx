@@ -19,7 +19,7 @@ Use it now!
 ## Features
 
 * 100% Kotlin public API with coroutines and `Parcelize`! Easy to use and virtually no boilerplate code/aidl
-* 100% event driven via suspend functions, no blocking calls
+* 100% event driven via suspend functions, no blocking calls (daemon setup excluded due to blocking code in libsu)
 * Persistent root session that closes itself on inactive (optional and configurable)
 * libsu RootService backend with Binder IPC, including normal `ParcelFileDescriptor` passing
 
