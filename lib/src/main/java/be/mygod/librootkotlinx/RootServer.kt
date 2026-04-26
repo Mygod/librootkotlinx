@@ -20,18 +20,17 @@ import com.topjohnwu.superuser.Shell
 import com.topjohnwu.superuser.ipc.RootService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asExecutor
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.channels.ClosedSendChannelException
 import kotlinx.coroutines.channels.SendChannel
-import kotlinx.coroutines.channels.produce
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.buffer
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -67,15 +66,15 @@ class RootServer internal constructor() {
             }
         }
 
-        class Channel(
+        class Flow(
             server: RootServer,
             index: Long,
             classLoader: ClassLoader?,
             private val channel: SendChannel<Parcelable?>,
         ) : Callback(server, index, classLoader) {
-            val finish = CompletableDeferred<Unit>()
-
-            override fun cancel(e: CancellationException?) = finish.cancel(e)
+            override fun cancel(e: CancellationException?) {
+                channel.close(e)
+            }
             override fun shouldRemove(status: Int) = status != RootCommandResponse.SUCCESS
             override fun invoke(response: RootCommandResponse) {
                 when (response.status) {
@@ -83,12 +82,17 @@ class RootServer internal constructor() {
                         val result = channel.trySend(response.payload)
                         if (result.isClosed) {
                             server.cancelRemote(index, this)
-                            finish.completeExceptionally(result.exceptionOrNull()
-                                    ?: ClosedSendChannelException("Channel was closed normally"))
-                        } else result.exceptionOrNull()?.let { throw it }
+                        } else if (result.isFailure) {
+                            val cause = result.exceptionOrNull()
+                                    ?: IllegalStateException("Flow buffer rejected root command response")
+                            server.cancelRemote(index, this)
+                            channel.close(cause)
+                        }
                     }
-                    RootCommandResponse.CHANNEL_CONSUMED -> finish.complete(Unit)
-                    else -> finish.completeExceptionally(response.readException(classLoader))
+                    RootCommandResponse.COMPLETE -> channel.close()
+                    else -> {
+                        channel.close(response.readException(classLoader))
+                    }
                 }
             }
         }
@@ -286,30 +290,17 @@ class RootServer internal constructor() {
         }
     }
 
-    @ExperimentalCoroutinesApi
-    @Throws(RemoteException::class)
-    inline fun <T : Parcelable?, reified C : RootCommandChannel<T>> create(command: C, scope: CoroutineScope) =
-        create(command, scope, C::class.java.classLoader)
-    @ExperimentalCoroutinesApi
-    @Throws(RemoteException::class)
-    fun <T : Parcelable?> create(command: RootCommandChannel<T>, scope: CoroutineScope, classLoader: ClassLoader?) =
-        scope.produce<T>(SupervisorJob(), command.capacity.also {
-            when (it) {
-                Channel.UNLIMITED, Channel.CONFLATED -> { }
-                else -> throw IllegalArgumentException("Unsupported channel capacity $it")
-            }
-        }) {
-            @Suppress("UNCHECKED_CAST")
-            val registered = registerCallback {
-                Callback.Channel(this@RootServer, it, classLoader, this as SendChannel<Parcelable?>)
-            } ?: throw UnexpectedExitException().asCancellationException()
-            send(registered, command)
-            try {
-                (registered.callback as Callback.Channel).finish.await()
-            } finally {
-                if (unregisterIfActive(registered)) cancelRemote(registered.id)
-            }
+    inline fun <T : Parcelable?, reified C : RootFlow<T>> flow(source: C) = flow(source, C::class.java.classLoader)
+    fun <T : Parcelable?> flow(source: RootFlow<T>, classLoader: ClassLoader?): Flow<T> = callbackFlow<T> {
+        @Suppress("UNCHECKED_CAST")
+        val registered = registerCallback {
+            Callback.Flow(this@RootServer, it, classLoader, this as SendChannel<Parcelable?>)
+        } ?: throw UnexpectedExitException()
+        send(registered, source)
+        awaitClose {
+            if (unregisterIfActive(registered)) cancelRemote(registered.id)
         }
+    }.buffer(Channel.UNLIMITED)
 
     private fun registerCallback(factory: (Long) -> Callback) = synchronized(callbackLookup) {
         val remote = service ?: return@synchronized null

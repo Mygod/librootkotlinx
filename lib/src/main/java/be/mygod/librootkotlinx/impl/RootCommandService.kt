@@ -7,8 +7,8 @@ import android.os.RemoteException
 import be.mygod.librootkotlinx.Logger
 import be.mygod.librootkotlinx.ParcelableThrowable
 import be.mygod.librootkotlinx.RootCommand
-import be.mygod.librootkotlinx.RootCommandChannel
 import be.mygod.librootkotlinx.RootCommandOneWay
+import be.mygod.librootkotlinx.RootFlow
 import com.topjohnwu.superuser.ipc.RootService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -17,9 +17,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.channels.consumeEach
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -45,13 +44,11 @@ internal class RootCommandService : RootService() {
                 is RootCommand<*> -> launchCancellable(id, callback) {
                     callback.sendResponse(id, RootCommandResponse(RootCommandResponse.SUCCESS, command.execute()))
                 }
-                is RootCommandChannel<*> -> launchCancellable(id, callback) {
-                    coroutineScope {
-                        command.create(this).consumeEach { result ->
-                            callback.sendResponse(id, RootCommandResponse(RootCommandResponse.SUCCESS, result))
-                        }
+                is RootFlow<*> -> launchCancellable(id, callback) {
+                    command.flow().collect { result ->
+                        callback.sendResponse(id, RootCommandResponse(RootCommandResponse.SUCCESS, result))
                     }
-                    callback.sendResponse(id, RootCommandResponse(RootCommandResponse.CHANNEL_CONSUMED, null))
+                    callback.sendResponse(id, RootCommandResponse(RootCommandResponse.COMPLETE, null))
                 }
                 else -> commandScope.launch {
                     callback.trySendThrowable(id, IllegalArgumentException("Unrecognized input: $command"))

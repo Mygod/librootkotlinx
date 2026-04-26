@@ -2,10 +2,8 @@ package be.mygod.librootkotlinx
 
 import android.os.Parcelable
 import androidx.annotation.MainThread
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.DelicateCoroutinesApi
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.channels.ReceiveChannel
+import kotlinx.coroutines.flow.Flow
 
 interface RootCommand<Result : Parcelable?> : Parcelable {
     /**
@@ -29,13 +27,10 @@ interface RootCommandOneWay : Parcelable {
     suspend fun execute()
 }
 
-interface RootCommandChannel<T : Parcelable?> : Parcelable {
+interface RootFlow<T : Parcelable?> : Parcelable {
     /**
-     * The capacity of the channel that is returned by [create] to be used by client.
-     * Only [Channel.UNLIMITED] and [Channel.CONFLATED] is supported for now to avoid blocking the entire connection.
+     * Returns a cold flow. Each client collection starts one root-side collection.
      */
-    val capacity: Int get() = Channel.UNLIMITED
-
     @MainThread
-    fun create(scope: CoroutineScope): ReceiveChannel<T>
+    fun flow(): Flow<T>
 }

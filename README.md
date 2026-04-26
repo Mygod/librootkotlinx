@@ -29,7 +29,7 @@ librootkotlinx 2.0 now uses libsu's RootService backend.
 It keeps this library's coroutine-oriented `RootCommand` and `RootSession` API while delegating root process startup and Binder IPC compatibility to libsu.
 You may think of this library as an unofficial `libsu-ktx`.
 
-* librootkotlinx exposes suspend functions and coroutine channels instead of requiring consumers to write AIDL.
+* librootkotlinx exposes suspend functions and Kotlin Flow instead of requiring consumers to write AIDL.
 * librootkotlinx depends on `com.github.topjohnwu.libsu:service`, so consumers need the JitPack repository available.
 * libsu has additional APIs such as shell helpers and remote file system support; librootkotlinx intentionally keeps
   those outside its public API.

@@ -19,7 +19,7 @@ internal class RootCommandResponse(val status: Int, val payload: Parcelable?) : 
         const val SUCCESS = 0
         const val EX_THROWABLE = 1
         const val EX_PARCELABLE = 2
-        const val CHANNEL_CONSUMED = 3
+        const val COMPLETE = 3
 
         private fun makeRemoteException(cause: Throwable) = cause as? CancellationException
                 ?: RemoteException(cause.message).apply { initCause(cause) }

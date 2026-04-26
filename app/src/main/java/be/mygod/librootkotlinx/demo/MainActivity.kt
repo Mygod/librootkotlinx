@@ -8,13 +8,11 @@ import androidx.activity.ComponentActivity
 import androidx.lifecycle.lifecycleScope
 import be.mygod.librootkotlinx.ParcelableString
 import be.mygod.librootkotlinx.RootCommand
-import be.mygod.librootkotlinx.RootCommandChannel
+import be.mygod.librootkotlinx.RootFlow
 import be.mygod.librootkotlinx.RootCommandNoResult
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.channels.produce
-import kotlinx.coroutines.channels.toList
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.parcelize.Parcelize
@@ -35,12 +33,8 @@ class MainActivity : ComponentActivity() {
     }
 
     @Parcelize
-    class ChannelDemo : RootCommandChannel<ParcelableString> {
-        @OptIn(ExperimentalCoroutinesApi::class)
-        override fun create(scope: CoroutineScope) = scope.produce {
-            send(ParcelableString("Hello"))
-            send(ParcelableString("World"))
-        }
+    class FlowDemo : RootFlow<ParcelableString> {
+        override fun flow() = flowOf(ParcelableString("Hello"), ParcelableString("World"))
     }
 
     @Parcelize
@@ -52,7 +46,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    @OptIn(ExperimentalCoroutinesApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -70,7 +63,7 @@ class MainActivity : ComponentActivity() {
                     val fdResult = withContext(Dispatchers.IO) {
                         ParcelFileDescriptor.AutoCloseInputStream(pipe[0]).bufferedReader().readText()
                     }
-                    it.execute(SimpleTest()).value + '\n' + it.create(ChannelDemo(), lifecycleScope).toList()
+                    it.execute(SimpleTest()).value + '\n' + it.flow(FlowDemo()).toList()
                         .joinToString { it.value } + "\n\n" + fdResult
                 }
             } catch (e: Exception) {
