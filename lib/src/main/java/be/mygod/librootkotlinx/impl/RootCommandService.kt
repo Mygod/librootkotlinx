@@ -12,6 +12,7 @@ import be.mygod.librootkotlinx.RootCommandOneWay
 import com.topjohnwu.superuser.ipc.RootService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -41,14 +42,24 @@ internal class RootCommandService : RootService() {
     private val binder = object : IRootCommandService.Stub() {
         override fun execute(id: Long, request: RootCommandRequest, callback: IRootCommandCallback) {
             when (val command = request.command) {
-                is RootCommand<*> -> executeCommand(id, command, callback)
-                is RootCommandChannel<*> -> executeChannel(id, command, callback)
+                is RootCommand<*> -> launchCancellable(id, callback) {
+                    callback.sendResponse(id, RootCommandResponse(RootCommandResponse.SUCCESS, command.execute()))
+                }
+                is RootCommandChannel<*> -> launchCancellable(id, callback) {
+                    coroutineScope {
+                        command.create(this).consumeEach { result ->
+                            callback.sendResponse(id, RootCommandResponse(RootCommandResponse.SUCCESS, result))
+                        }
+                    }
+                    callback.sendResponse(id, RootCommandResponse(RootCommandResponse.CHANNEL_CONSUMED, null))
+                }
                 else -> commandScope.launch {
                     callback.trySendThrowable(id, IllegalArgumentException("Unrecognized input: $command"))
                 }
             }
         }
 
+        @OptIn(DelicateCoroutinesApi::class)
         override fun executeOneWay(request: RootCommandRequest) {
             val command = request.command
             commandScope.launch {
@@ -67,40 +78,22 @@ internal class RootCommandService : RootService() {
         override fun close(callback: IRootCommandCallback) = cancel(callback.asBinder())
     }
 
-    private fun executeCommand(id: Long, command: RootCommand<*>, callback: IRootCommandCallback) {
+    private fun launchCancellable(id: Long, callback: IRootCommandCallback, block: suspend CoroutineScope.() -> Unit) {
         val commandKey = CommandKey(callback.asBinder(), id)
         val commandJob = Job(serviceJob)
         synchronized(this) { cancellables[commandKey] = commandJob }
-        commandScope.launch(commandJob) {
-            try {
-                callback.sendResponse(id, RootCommandResponse(RootCommandResponse.SUCCESS, command.execute()))
-            } catch (e: Throwable) {
-                if (e is CancellationException && !currentCoroutineContext().isActive) return@launch
-                callback.trySendThrowable(id, e)
-            } finally {
-                synchronized(this@RootCommandService) { cancellables.remove(commandKey) }
-                commandJob.complete()
+        commandJob.invokeOnCompletion {
+            synchronized(this@RootCommandService) {
+                if (cancellables[commandKey] === commandJob) cancellables.remove(commandKey)
             }
         }
-    }
-
-    private fun executeChannel(id: Long, command: RootCommandChannel<*>, callback: IRootCommandCallback) {
-        val commandKey = CommandKey(callback.asBinder(), id)
-        val commandJob = Job(serviceJob)
-        synchronized(this) { cancellables[commandKey] = commandJob }
         commandScope.launch(commandJob) {
             try {
-                coroutineScope {
-                    command.create(this).consumeEach { result ->
-                        callback.sendResponse(id, RootCommandResponse(RootCommandResponse.SUCCESS, result))
-                    }
-                }
-                callback.sendResponse(id, RootCommandResponse(RootCommandResponse.CHANNEL_CONSUMED, null))
+                block()
             } catch (e: Throwable) {
                 if (e is CancellationException && !currentCoroutineContext().isActive) return@launch
                 callback.trySendThrowable(id, e)
             } finally {
-                synchronized(this@RootCommandService) { cancellables.remove(commandKey) }
                 commandJob.complete()
             }
         }

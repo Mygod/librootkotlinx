@@ -3,6 +3,7 @@ package be.mygod.librootkotlinx
 import android.os.Parcelable
 import androidx.annotation.MainThread
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
 
@@ -17,10 +18,12 @@ interface RootCommand<Result : Parcelable?> : Parcelable {
 typealias RootCommandNoResult = RootCommand<Parcelable?>
 
 /**
- * Execute a command and discards its result, even if an exception occurs.
+ * Execute a command and discard its result, even if an exception occurs.
  *
- * If you want to catch exception, use e.g. [RootCommandNoResult] and return null.
+ * Use [RootCommandNoResult] and return null for almost all commands that do not return data. Use this only for
+ * intentionally detached work where the caller does not need completion, failure, or cancellation feedback.
  */
+@DelicateCoroutinesApi
 interface RootCommandOneWay : Parcelable {
     @MainThread
     suspend fun execute()

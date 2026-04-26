@@ -257,6 +257,7 @@ class RootServer internal constructor() {
         }
     }
 
+    @DelicateCoroutinesApi
     fun execute(command: RootCommandOneWay) {
         val remote = synchronized(callbackLookup) {
             if (active) service else null
