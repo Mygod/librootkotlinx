@@ -3,6 +3,7 @@
 package be.mygod.librootkotlinx
 
 import android.annotation.SuppressLint
+import android.content.Context
 import android.os.IBinder
 import android.os.Parcel
 import android.os.Parcelable
@@ -14,6 +15,14 @@ import android.util.SparseIntArray
 import android.util.SparseLongArray
 import androidx.annotation.RequiresApi
 import kotlinx.parcelize.Parcelize
+
+/**
+ * Context for code running in the root service process.
+ *
+ * This is initialized after [RootServer.init] has bound the root service.
+ */
+lateinit var systemContext: Context
+    internal set
 
 @Parcelize
 data class ParcelableByte(val value: Byte) : Parcelable

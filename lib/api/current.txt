@@ -314,7 +314,10 @@ package be.mygod.librootkotlinx {
   }
 
   public final class Utils {
+    method @InaccessibleFromKotlin public static android.content.Context getSystemContext();
     method public static inline <T> T useParcel(kotlin.jvm.functions.Function1<? super android.os.Parcel,? extends T> block);
+    property public static android.content.Context systemContext;
+    field public static android.content.Context systemContext;
   }
 
   public typealias RootCommandNoResult = be.mygod.librootkotlinx.RootCommand<android.os.Parcelable?>;

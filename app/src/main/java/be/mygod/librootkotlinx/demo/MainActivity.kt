@@ -10,6 +10,7 @@ import be.mygod.librootkotlinx.ParcelableString
 import be.mygod.librootkotlinx.RootCommand
 import be.mygod.librootkotlinx.RootFlow
 import be.mygod.librootkotlinx.RootCommandNoResult
+import be.mygod.librootkotlinx.systemContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
@@ -20,7 +21,7 @@ import kotlinx.parcelize.Parcelize
 class MainActivity : ComponentActivity() {
     @Parcelize
     class SimpleTest : RootCommand<ParcelableString> {
-        override suspend fun execute() = ParcelableString("uid: ${Jni.getuid()}\n" + withContext(Dispatchers.IO) {
+        override suspend fun execute() = ParcelableString("context: ${systemContext.packageName}\nuid: ${Jni.getuid()}\n" + withContext(Dispatchers.IO) {
             // Try to execute a restricted subprocess command.
             val process = ProcessBuilder("/system/bin/iptables", "-L", "INPUT").start()
             var output = process.inputStream.reader().readText()

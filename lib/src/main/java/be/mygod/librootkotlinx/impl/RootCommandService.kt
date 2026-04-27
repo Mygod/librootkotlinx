@@ -9,6 +9,7 @@ import be.mygod.librootkotlinx.ParcelableThrowable
 import be.mygod.librootkotlinx.RootCommand
 import be.mygod.librootkotlinx.RootCommandOneWay
 import be.mygod.librootkotlinx.RootFlow
+import be.mygod.librootkotlinx.systemContext
 import com.topjohnwu.superuser.ipc.RootService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -31,7 +32,10 @@ internal class RootCommandService : RootService() {
     private val callbackDispatcher = Dispatchers.Default.limitedParallelism(1)
     private val cancellables = HashMap<CommandKey, Job>()
 
-    override fun onBind(intent: Intent): IBinder = binder
+    override fun onBind(intent: Intent): IBinder {
+        systemContext = this
+        return binder
+    }
 
     override fun onDestroy() {
         serviceJob.cancel()
