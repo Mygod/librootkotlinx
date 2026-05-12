@@ -21,6 +21,7 @@ import kotlinx.parcelize.Parcelize
  *
  * This is initialized after [RootServer.init] has bound the root service.
  */
+@SuppressLint("StaticFieldLeak")
 lateinit var systemContext: Context
     internal set
 
