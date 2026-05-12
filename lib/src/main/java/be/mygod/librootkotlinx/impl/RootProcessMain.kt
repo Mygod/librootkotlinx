@@ -3,7 +3,6 @@ package be.mygod.librootkotlinx.impl
 import android.net.LocalSocket
 import android.net.LocalSocketAddress
 import android.os.Looper
-import android.os.ParcelFileDescriptor
 import android.util.Log
 import be.mygod.librootkotlinx.io.openReadChannel
 import io.ktor.utils.io.discard
@@ -12,7 +11,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
-import java.io.EOFException
 import java.io.IOException
 import kotlin.system.exitProcess
 
@@ -21,7 +19,6 @@ internal object RootProcessMain {
     const val OWNERSHIP_SOCKET_ENV = "LIBROOTKOTLINX_OWNERSHIP_SOCKET"
 
     @JvmStatic
-    @Suppress("DEPRECATION")
     fun main(args: Array<String>) {
         if (args.size < 3) {
             System.err.println("RootProcessMain requires component, uid, and action arguments")
@@ -40,6 +37,7 @@ internal object RootProcessMain {
             // Mirrors libsu RootServerMain.main after argument validation, except the first two lines that close
             // stdout/stderr. Keeping those descriptors open is the point of this entry point.
             // https://github.com/topjohnwu/libsu/blob/8314fa2f48b8421cdb1d38c472c518167b1cba9d/service/jar/src/main/java/com/topjohnwu/superuser/internal/RootServerMain.java#L70-L88
+            @Suppress("DEPRECATION")
             Looper.prepareMainLooper()
             monitorOwnership(ownership)
             val rootServerMain = Class.forName("com.topjohnwu.superuser.internal.RootServerMain")
@@ -62,10 +60,6 @@ internal object RootProcessMain {
         val socket = LocalSocket()
         try {
             socket.connect(LocalSocketAddress(socketName))
-            val accepted = socket.inputStream.read()
-            if (accepted != RootProcessOwnership.ACCEPTED.toInt()) {
-                throw EOFException("Root process ownership socket closed before startup was accepted")
-            }
             return socket
         } catch (e: Throwable) {
             try {
@@ -80,7 +74,7 @@ internal object RootProcessMain {
     private fun monitorOwnership(socket: LocalSocket) {
         val looper = Looper.getMainLooper()
         CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate).launch {
-            val channel = ParcelFileDescriptor.dup(socket.fileDescriptor).openReadChannel(looper)
+            val channel = socket.fileDescriptor.openReadChannel(looper)
             try {
                 channel.discard()
                 Log.w(TAG, "Root process ownership revoked")
@@ -90,11 +84,6 @@ internal object RootProcessMain {
                 Log.w(TAG, "Root process ownership monitor failed", e)
             } finally {
                 channel.cancel(null)
-                try {
-                    socket.close()
-                } catch (e: IOException) {
-                    Log.w(TAG, "Failed to close root process ownership socket", e)
-                }
                 exitProcess(0)
             }
         }

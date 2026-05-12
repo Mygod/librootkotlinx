@@ -5,15 +5,12 @@ import android.net.LocalSocket
 import android.os.Handler
 import android.os.Looper
 import android.os.MessageQueue
-import android.os.ParcelFileDescriptor
 import android.os.Process
 import android.system.ErrnoException
 import android.system.OsConstants
 import be.mygod.librootkotlinx.Logger
 import be.mygod.librootkotlinx.io.FileDescriptorEventAwaiter
 import be.mygod.librootkotlinx.io.isNonblocking
-import be.mygod.librootkotlinx.io.openWriteChannel
-import io.ktor.utils.io.writeByte
 import kotlinx.coroutines.CancellationException
 import java.io.Closeable
 import java.io.IOException
@@ -58,7 +55,6 @@ internal class RootProcessOwnership : Closeable {
                         }
                     }
                     closeServerSocket()
-                    sendAccepted(accepted)
                     return
                 } catch (e: IOException) {
                     close(accepted)
@@ -67,17 +63,6 @@ internal class RootProcessOwnership : Closeable {
             }
         } finally {
             awaiter.close()
-        }
-    }
-
-    private suspend fun sendAccepted(socket: LocalSocket) {
-        val channel = ParcelFileDescriptor.dup(socket.fileDescriptor).openWriteChannel()
-        try {
-            channel.writeByte(ACCEPTED)
-            channel.flushAndClose()
-        } catch (e: Throwable) {
-            channel.cancel(e)
-            throw e
         }
     }
 
@@ -101,9 +86,5 @@ internal class RootProcessOwnership : Closeable {
         } catch (e: IOException) {
             Logger.me.w("Failed to close root process ownership resource", e)
         }
-    }
-
-    companion object {
-        const val ACCEPTED: Byte = 0
     }
 }

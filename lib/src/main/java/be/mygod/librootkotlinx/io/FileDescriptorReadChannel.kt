@@ -1,4 +1,4 @@
-@file:JvmName("ParcelFileDescriptorChannels")
+@file:JvmName("FileDescriptorChannels")
 @file:JvmMultifileClass
 
 package be.mygod.librootkotlinx.io
@@ -22,21 +22,20 @@ import kotlinx.coroutines.android.asCoroutineDispatcher
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import java.io.File
 import java.io.FileDescriptor
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Read channel backed by an owned [ParcelFileDescriptor] registered on a [MessageQueue].
+ * Read channel backed by a [FileDescriptor] registered on a [MessageQueue].
  */
-internal class ParcelFileDescriptorReadChannel(
-    private val descriptor: ParcelFileDescriptor,
-    looper: Looper = Looper.getMainLooper(),
-    private val buffer: ByteArray = ByteArray(DEFAULT_BUFFER_SIZE),
+internal class FileDescriptorReadChannel(
+    private val fileDescriptor: FileDescriptor,
+    looper: Looper,
+    private val buffer: ByteArray,
     private val channel: ByteChannel = ByteChannel(autoFlush = true),
+    private val closeDescriptor: () -> Unit,
 ) : ByteReadChannel by channel {
-    private val fileDescriptor = descriptor.fileDescriptor
     private val handler = Handler(looper)
     private val eventAwaiter = FileDescriptorEventAwaiter(fileDescriptor, handler)
     private val closed = AtomicBoolean()
@@ -112,7 +111,7 @@ internal class ParcelFileDescriptorReadChannel(
         val closeError = if (!closed.compareAndSet(false, true)) null else {
             eventAwaiter.close()
             try {
-                descriptor.close()
+                closeDescriptor()
                 null
             } catch (e: IOException) {
                 e
@@ -141,14 +140,21 @@ internal class ParcelFileDescriptorReadChannel(
 fun ParcelFileDescriptor.openReadChannel(
     looper: Looper = Looper.getMainLooper(),
     buffer: ByteArray = ByteArray(DEFAULT_BUFFER_SIZE),
-): ByteReadChannel = ParcelFileDescriptorReadChannel(this, looper, buffer)
+): ByteReadChannel = FileDescriptorReadChannel(fileDescriptor, looper, buffer) { close() }
 
-suspend fun ParcelFileDescriptor.forEachLine(block: (String) -> Unit) {
-    val channel = openReadChannel()
+/**
+ * Opens a read channel that owns this [FileDescriptor].
+ *
+ * Closing or cancelling the returned channel closes the descriptor. This API does not provide socket-style half shutdown.
+ */
+fun FileDescriptor.openReadChannel(
+    looper: Looper = Looper.getMainLooper(),
+    buffer: ByteArray = ByteArray(DEFAULT_BUFFER_SIZE),
+): ByteReadChannel = FileDescriptorReadChannel(this, looper, buffer) {
     try {
-        while (true) block(channel.readLine() ?: break)
-    } finally {
-        channel.cancel(null)
+        Os.close(this)
+    } catch (e: ErrnoException) {
+        throw IOException(e)
     }
 }
 
@@ -165,4 +171,10 @@ var FileDescriptor.isNonblocking: Boolean
         })
     }
 
-fun ParcelFileDescriptor.toFile() = File("/proc/self/fd/${fd}")
+suspend fun ByteReadChannel.forEachLine(block: (String) -> Unit) {
+    try {
+        while (true) block(readLine() ?: break)
+    } finally {
+        cancel(null)
+    }
+}

@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.ParcelFileDescriptor
 import androidx.annotation.CallSuper
 import be.mygod.librootkotlinx.io.forEachLine
+import be.mygod.librootkotlinx.io.openReadChannel
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineDispatcher
@@ -45,8 +46,8 @@ abstract class RootSession {
     ) {
         stdin.close()
         coroutineScope {
-            launch { stdout.forEachLine(Logger.me::i) }
-            launch { stderr.forEachLine(Logger.me::e) }
+            launch { stdout.openReadChannel().forEachLine(Logger.me::i) }
+            launch { stderr.openReadChannel().forEachLine(Logger.me::e) }
         }
     }
 
