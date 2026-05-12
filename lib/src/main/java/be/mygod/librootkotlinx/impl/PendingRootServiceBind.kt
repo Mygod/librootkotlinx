@@ -11,9 +11,7 @@ import com.topjohnwu.superuser.ipc.RootService
  * task, but root shell startup fails before libsu receives the root service manager broadcast.
  */
 @SuppressLint("RestrictedApi")
-internal class PendingRootServiceBind @MainThread constructor(
-    intent: Intent,
-) {
+internal class PendingRootServiceBind @MainThread constructor(intent: Intent) {
     private val enRouteFlag = if (intent.hasCategory(RootService.CATEGORY_DAEMON_MODE)) {
         DAEMON_EN_ROUTE
     } else REMOTE_EN_ROUTE

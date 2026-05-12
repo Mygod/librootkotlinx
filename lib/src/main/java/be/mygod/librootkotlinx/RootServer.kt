@@ -371,40 +371,15 @@ class RootServer internal constructor() {
      * Creates a cold [Flow] backed by [source] in the root service.
      *
      * Each collection registers a new remote command and starts one root-side [RootFlow.flow] collection. Cancelling the
-     * client collector unregisters that command and asks the root service to cancel its job. Results are buffered with
-     * [Channel.UNLIMITED] by default so Binder callbacks do not suspend on collector backpressure.
-     */
-    inline fun <T : Parcelable?, reified C : RootFlow<T>> flow(source: C) = flow(
-        source,
-        C::class.java.classLoader,
-    )
-
-    /**
-     * Creates a cold [Flow] backed by [source] in the root service.
-     *
-     * Each collection registers a new remote command and starts one root-side [RootFlow.flow] collection. Cancelling the
      * client collector unregisters that command and asks the root service to cancel its job. [capacity] and
      * [onBufferOverflow] configure the local response buffer. If the buffer rejects a root response, the remote command is
      * cancelled and the client flow fails.
      */
     inline fun <T : Parcelable?, reified C : RootFlow<T>> flow(
         source: C,
-        capacity: Int,
+        capacity: Int = Channel.UNLIMITED,
         onBufferOverflow: BufferOverflow = BufferOverflow.SUSPEND,
     ) = flow(source, C::class.java.classLoader, capacity, onBufferOverflow)
-
-    /**
-     * Creates a cold [Flow] backed by [source] in the root service.
-     *
-     * Each collection registers a new remote command and starts one root-side [RootFlow.flow] collection. Cancelling the
-     * client collector unregisters that command and asks the root service to cancel its job. Results are buffered with
-     * [Channel.UNLIMITED] by default so Binder callbacks do not suspend on collector backpressure.
-     */
-    fun <T : Parcelable?> flow(source: RootFlow<T>, classLoader: ClassLoader?): Flow<T> = flow(
-        source,
-        classLoader,
-        Channel.UNLIMITED,
-    )
 
     /**
      * Creates a cold [Flow] backed by [source] in the root service.
@@ -417,7 +392,7 @@ class RootServer internal constructor() {
     fun <T : Parcelable?> flow(
         source: RootFlow<T>,
         classLoader: ClassLoader?,
-        capacity: Int,
+        capacity: Int = Channel.UNLIMITED,
         onBufferOverflow: BufferOverflow = BufferOverflow.SUSPEND,
     ): Flow<T> = callbackFlow<T> {
         @Suppress("UNCHECKED_CAST")

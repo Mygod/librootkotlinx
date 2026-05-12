@@ -8,7 +8,6 @@ import be.mygod.librootkotlinx.RootSession
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
-import java.util.concurrent.TimeUnit
 import kotlin.time.Duration.Companion.seconds
 
 class App : Application() {
@@ -20,6 +19,7 @@ class App : Application() {
         super.onCreate()
         // simply initialize a global instance, this is a very lightweight operation
         rootManager = object : RootSession() {
+            override val context get() = this@App
             override val timeout get() = 5.seconds
             override suspend fun initServer(server: RootServer) {
                 if (BuildConfig.DEBUG) Logger.me = object : Logger {
@@ -27,7 +27,7 @@ class App : Application() {
                         Log.d("RootServer", m, t)
                     }
                 }
-                server.init(this@App)
+                super.initServer(server)
             }
         }
         Log.d("App", "init")
