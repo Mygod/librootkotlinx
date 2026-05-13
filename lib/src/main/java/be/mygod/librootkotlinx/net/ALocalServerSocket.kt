@@ -16,7 +16,7 @@ import java.io.IOException
  */
 class ALocalServerSocket(val socket: LocalServerSocket, private val handler: Handler) : Closeable {
     private val eventAwaiter = FileDescriptorEventAwaiter(socket.fileDescriptor, handler.looper.queue)
-    private val dispatcher = handler.asCoroutineDispatcher("local-server-socket")
+    private val dispatcher = handler.asCoroutineDispatcher("local-server-socket").immediate
 
     init {
         socket.fileDescriptor.isNonblocking = true

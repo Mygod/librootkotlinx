@@ -5,7 +5,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.ParcelFileDescriptor
 import androidx.annotation.CallSuper
-import be.mygod.librootkotlinx.io.forEachLine
+import be.mygod.librootkotlinx.io.useLines
 import be.mygod.librootkotlinx.io.openReadChannel
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
@@ -49,8 +49,8 @@ abstract class RootSession {
         stdin.close()
         val handler = Handler(Looper.getMainLooper())
         coroutineScope {
-            launch { stdout.openReadChannel(handler).forEachLine(Logger.me::i) }
-            launch { stderr.openReadChannel(handler).forEachLine(Logger.me::e) }
+            launch { stdout.openReadChannel(handler).useLines(Logger.me::i) }
+            launch { stderr.openReadChannel(handler).useLines(Logger.me::e) }
         }
     }
 

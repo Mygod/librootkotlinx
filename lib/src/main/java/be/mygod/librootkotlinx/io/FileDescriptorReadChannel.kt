@@ -187,7 +187,7 @@ var FileDescriptor.isNonblocking: Boolean
         })
     }
 
-suspend fun ByteReadChannel.forEachLine(block: (String) -> Unit) {
+suspend fun ByteReadChannel.useLines(block: (String) -> Unit) {
     try {
         while (true) block(readLine() ?: break)
     } finally {
