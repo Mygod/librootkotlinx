@@ -8,13 +8,15 @@ import android.os.IBinder
 import android.os.Parcelable
 import android.os.ParcelFileDescriptor
 import android.os.RemoteException
-import androidx.collection.MutableLongObjectMap
-import androidx.collection.MutableObjectList
 import be.mygod.librootkotlinx.impl.IRootCommandCallback
 import be.mygod.librootkotlinx.impl.IRootCommandService
 import be.mygod.librootkotlinx.impl.PendingRootServiceBind
+import be.mygod.librootkotlinx.impl.RegisteredRootCommandCallback
+import be.mygod.librootkotlinx.impl.RootCommandCallback
+import be.mygod.librootkotlinx.impl.RootCommandCallbacks
 import be.mygod.librootkotlinx.impl.RootCommandRequest
 import be.mygod.librootkotlinx.impl.RootCommandResponse
+import be.mygod.librootkotlinx.impl.RootCommandResponseHandling
 import be.mygod.librootkotlinx.impl.RootCommandService
 import be.mygod.librootkotlinx.impl.RootProcessLauncher
 import be.mygod.librootkotlinx.impl.RootProcessOwnership
@@ -22,6 +24,7 @@ import com.topjohnwu.superuser.ipc.RootService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -35,113 +38,70 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
-import java.util.concurrent.atomic.AtomicBoolean
-import kotlin.coroutines.EmptyCoroutineContext
-import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
 
 class RootServer internal constructor() {
-    private sealed class Callback(
-        protected val server: RootServer,
-        val index: Long,
-        protected val classLoader: ClassLoader?,
-    ) {
-        var active = true
-
-        abstract fun close(cause: Throwable)
-        abstract fun shouldRemove(status: Int): Boolean
-        abstract operator fun invoke(response: RootCommandResponse)
-
-        class Ordinary(
-            server: RootServer,
-            index: Long,
-            classLoader: ClassLoader?,
-            private val result: CompletableDeferred<Parcelable?>,
-        ) : Callback(server, index, classLoader) {
-            override fun close(cause: Throwable) {
-                if (cause is CancellationException) result.cancel(cause)
-                else result.completeExceptionally(cause)
-            }
-            override fun shouldRemove(status: Int) = true
-            override fun invoke(response: RootCommandResponse) {
-                if (response.status == RootCommandResponse.SUCCESS) {
-                    result.complete(response.payload)
-                } else {
-                    result.completeExceptionally(response.readException(classLoader))
-                }
-            }
-        }
-
-        class Flow(
-            server: RootServer,
-            index: Long,
-            classLoader: ClassLoader?,
-            private val channel: SendChannel<Parcelable?>,
-        ) : Callback(server, index, classLoader) {
-            override fun close(cause: Throwable) {
-                channel.close(cause)
-            }
-            override fun shouldRemove(status: Int) = status != RootCommandResponse.SUCCESS
-            override fun invoke(response: RootCommandResponse) {
-                when (response.status) {
-                    RootCommandResponse.SUCCESS -> {
-                        val result = channel.trySend(response.payload)
-                        if (result.isClosed) {
-                            server.cancelRemote(index, this)
-                        } else if (result.isFailure) {
-                            val cause = result.exceptionOrNull()
-                                    ?: IllegalStateException("Flow buffer rejected root command response")
-                            server.cancelRemote(index, this)
-                            channel.close(cause)
-                        }
-                    }
-                    RootCommandResponse.COMPLETE -> channel.close()
-                    else -> {
-                        channel.close(response.readException(classLoader))
-                    }
-                }
-            }
-        }
-    }
-
-    private data class RegisteredCallback(val id: Long, val callback: Callback, val service: IRootCommandService)
-
     class UnexpectedExitException : RemoteException("Root service exited unexpectedly")
 
-    val active get() = synchronized(callbackLookup) { service != null && closeCause == null }
-    private val callbackLookup = MutableLongObjectMap<Callback>()
-    private val startupJob = Job()
-    private val startupScope = CoroutineScope(startupJob + Dispatchers.IO)
-    private var counter = 0L
-    private var service: IRootCommandService? = null
-    private var serviceConnection: ServiceConnection? = null
-    private var serviceBinder: IBinder? = null
-    private var ownership: RootProcessOwnership? = null
+    val active get() = connected != null && closeCause == null && serverJob.isActive
+    private val lifecycleLock = Any()
+    @Volatile
     private var closeCause: Throwable? = null
+    private var lifecycleStarted = false
+    private val serverJob = Job()
+    private val serverScope = CoroutineScope(Dispatchers.Default + serverJob)
+    // Command submissions and lifecycle callbacks are serialized here. Root responses bypass this queue so Flow
+    // backpressure stays caller-bounded.
+    private val events = Channel<Event>(Channel.UNLIMITED)
+    private val started = CompletableDeferred<Unit>()
+    private val rootServiceConnected = Job()
+    private val commandCallbacks = RootCommandCallbacks()
+
+    @Volatile
+    private var connected: ConnectedRootService? = null
+    private var startupBind: StartupBind? = null
+    private var startupHandler: Job? = null
+
+    private data class ConnectedRootService(
+        val connection: ServiceConnection,
+        val binder: IBinder,
+        val service: IRootCommandService,
+        val ownership: RootProcessOwnership?,
+    )
+
+    private class StartupBind(
+        val pending: PendingRootServiceBind,
+        val connection: ServiceConnection,
+    ) {
+        var clearPending = false
+        var ownership: RootProcessOwnership? = null
+        var launcher: RootProcessLauncher? = null
+    }
+
+    @OptIn(DelicateCoroutinesApi::class)
+    private sealed interface Event {
+        data class Connected(
+            val connection: ServiceConnection,
+            val binder: IBinder,
+            val service: IRootCommandService,
+        ) : Event
+        data class StartupFailed(val cause: Throwable) : Event
+        data class SendCommand(
+            val command: Parcelable,
+            val factory: (Long) -> RootCommandCallback,
+            val result: CompletableDeferred<RegisteredRootCommandCallback>,
+        ) : Event
+        data class CancelRemote(val id: Long, val callback: RootCommandCallback? = null) : Event
+    }
 
     // Session-scoped callback: multiplex by id to avoid leaking per-command Binder callback refs.
     private val callback = object : IRootCommandCallback.Stub(), IBinder.DeathRecipient {
         override fun onResponse(id: Long, response: RootCommandResponse) {
-            val callback = synchronized(callbackLookup) {
-                callbackLookup[id]?.also {
-                    if (it.shouldRemove(response.status)) {
-                        callbackLookup.remove(id)
-                        it.active = false
-                    }
-                }
-            } ?: return
-            try {
-                callback(response)
-            } catch (e: Throwable) {
-                callback.close(e)
-                Logger.me.w("Failed to handle root command response #$id", e)
-            }
+            handleResponse(id, response)
         }
 
         override fun binderDied() {
-            closeInternal(UnexpectedExitException())
+            requestClose(UnexpectedExitException())
         }
     }
 
@@ -161,191 +121,32 @@ class RootServer internal constructor() {
         context: Context,
         handleRootIo: suspend (ParcelFileDescriptor, ParcelFileDescriptor, ParcelFileDescriptor) -> Unit,
     ) {
-        synchronized(callbackLookup) {
-            require(service == null && closeCause == null) { "RootServer is already initialized or closed" }
+        synchronized(lifecycleLock) {
+            require(!lifecycleStarted && closeCause == null) { "RootServer is already initialized or closed" }
+            lifecycleStarted = true
+        }
+        // Start immediately so a close racing with init cannot cancel before cleanup is installed.
+        serverScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            runLifecycle(context, handleRootIo)
         }
         try {
-            withContext(Dispatchers.Main.immediate) { bind(context, handleRootIo) }
+            started.await()
         } catch (e: Throwable) {
-            closeInternal(e)
+            serverJob.cancel(e.asCancellationException())
+            withContext(NonCancellable) { serverJob.join() }
             throw e
         }
         Logger.me.d("Root server initialized")
     }
 
-    private suspend fun bind(
-        context: Context,
-        handleRootIo: suspend (ParcelFileDescriptor, ParcelFileDescriptor, ParcelFileDescriptor) -> Unit,
-    ) = suspendCancellableCoroutine { continuation ->
-        var resumed = false
-        val startupComplete = Job(startupJob)
-        var pendingBind: PendingRootServiceBind? = null
-        val cancelPendingBindOnCancellation = AtomicBoolean(false)
-        val connection = object : ServiceConnection {
-            fun isStartupPending() = synchronized(callbackLookup) {
-                closeCause == null && !resumed && continuation.isActive
-            }
-
-            fun resumeWithFailure(throwable: Throwable, clearEnRoute: Boolean = false) {
-                val connection = this
-                runOnMain {
-                    val (shouldResume, shouldClose) = synchronized(callbackLookup) {
-                        when (closeCause) {
-                            null if !resumed && continuation.isActive -> {
-                                resumed = true
-                                true to false
-                            }
-                            null if resumed -> false to (serviceConnection === connection)
-                            else -> false to false
-                        }
-                    }
-                    if (shouldResume || shouldClose) {
-                        startupComplete.complete()
-                        closeInternal(throwable)
-                    }
-                    if (clearEnRoute) {
-                        try {
-                            pendingBind?.cancel()
-                        } catch (e: Throwable) {
-                            if (shouldResume) throwable.addSuppressed(e)
-                            else Logger.me.w("Failed to clean up libsu pending RootService bind after bind failure", e)
-                        }
-                    }
-                    if (shouldResume) {
-                        unbind(connection, "Failed to unbind root service connection after bind failure")
-                        continuation.resumeWithException(throwable)
-                    }
-                }
-            }
-
-            override fun onServiceConnected(name: ComponentName, binder: IBinder) {
-                val remote = IRootCommandService.Stub.asInterface(binder)
-                try {
-                    binder.linkToDeath(callback, 0)
-                } catch (e: RemoteException) {
-                    resumeWithFailure(e)
-                    return
-                }
-                val shouldResume = synchronized(callbackLookup) {
-                    if (closeCause != null || resumed || !continuation.isActive) false else {
-                        resumed = true
-                        service = remote
-                        serviceConnection = this
-                        serviceBinder = binder
-                        cancelPendingBindOnCancellation.set(false)
-                        true
-                    }
-                }
-                if (shouldResume) {
-                    startupComplete.complete()
-                    continuation.resume(Unit)
-                } else {
-                    try {
-                        binder.unlinkToDeath(callback, 0)
-                    } catch (e: RuntimeException) {
-                        Logger.me.w("Failed to unlink root service death recipient after cancelled bind", e)
-                    }
-                    try {
-                        RootService.unbind(this)
-                    } catch (e: RuntimeException) {
-                        Logger.me.w("Failed to unbind root service connection after cancelled bind", e)
-                    }
-                }
-            }
-
-            override fun onServiceDisconnected(name: ComponentName) {
-                closeInternal(UnexpectedExitException())
-            }
-
-            override fun onBindingDied(name: ComponentName) = resumeWithFailure(UnexpectedExitException())
-
-            override fun onNullBinding(name: ComponentName) {
-                resumeWithFailure(IllegalStateException("Root service returned null binding"))
-            }
-        }
-
-        continuation.invokeOnCancellation { cause ->
-            val cancellation = cause ?: CancellationException("Root server initialization cancelled")
-            closeInternal(cancellation)
-            runOnMain {
-                if (!resumed && cancelPendingBindOnCancellation.getAndSet(false)) {
-                    try {
-                        pendingBind?.cancel()
-                    } catch (e: Throwable) {
-                        Logger.me.w("Failed to clean up libsu pending RootService bind after coroutine cancellation", e)
-                    }
-                }
-                unbind(connection, "Failed to unbind root service connection after coroutine cancellation")
-            }
-        }
-
-        val intent = Intent(context, RootCommandService::class.java)
-        val pending = try {
-            PendingRootServiceBind(intent)
-        } catch (e: Throwable) {
-            connection.resumeWithFailure(e)
-            return@suspendCancellableCoroutine
-        }
-        pendingBind = pending
-        val task = try {
-            RootService.bindOrTask(
-                intent,
-                Dispatchers.Main.immediate.asExecutor(),
-                connection,
-            ).also {
-                if (it != null && pending.ownsStartupIfQueued) {
-                    pending.captureQueuedTask()
-                    cancelPendingBindOnCancellation.set(true)
-                }
-            }
-        } catch (e: Throwable) {
-            connection.resumeWithFailure(e, clearEnRoute = pending.ownsStartupIfQueued)
-            null
-        }
-        if (task != null) {
-            val ownership = try {
-                RootProcessOwnership()
-            } catch (e: Throwable) {
-                connection.resumeWithFailure(e, clearEnRoute = pending.ownsStartupIfQueued)
-                return@suspendCancellableCoroutine
-            }
-            synchronized(callbackLookup) {
-                if (closeCause == null && continuation.isActive) this.ownership = ownership else {
-                    ownership.close()
-                    return@suspendCancellableCoroutine
-                }
-            }
-            val launcher = RootProcessLauncher(context, task, handleRootIo, ownership.socketName)
-            startupScope.launch {
-                try {
-                    launcher.run(
-                        startupScope,
-                        startupComplete,
-                        awaitStartupOwnership = { ownership.accept() },
-                    )
-                } catch (e: Throwable) {
-                    if (e is CancellationException) return@launch
-                    if (connection.isStartupPending()) connection.resumeWithFailure(e, clearEnRoute = true)
-                }
-            }
-        }
-    }
-
+    @Throws(RemoteException::class)
     @DelicateCoroutinesApi
     fun execute(command: RootCommandOneWay) {
-        var serviceCallFailed = false
+        val remote = connectedServiceOrThrow()
         try {
-            synchronized(callbackLookup) {
-                val remote = service ?: throw unavailableCauseLocked()
-                try {
-                    remote.executeOneWay(RootCommandRequest(command))
-                } catch (e: RemoteException) {
-                    serviceCallFailed = true
-                    throw e
-                }
-            }
+            remote.executeOneWay(RootCommandRequest(command))
         } catch (e: RemoteException) {
-            if (serviceCallFailed) closeAfterServiceCallFailure(e)
+            requestClose(e)
             throw e
         }
     }
@@ -353,17 +154,24 @@ class RootServer internal constructor() {
     @Throws(RemoteException::class)
     suspend inline fun <T : Parcelable?, reified C : RootCommand<T>> execute(command: C) =
         execute(command, C::class.java.classLoader)
+
+    /**
+     * Executes [command] in the root service and returns its result.
+     *
+     * Once command submission is accepted, coroutine cancellation no longer guarantees that the root command has not
+     * started. Cancellation waits for the command id and then asks the root service to cancel the command best-effort.
+     */
     @Throws(RemoteException::class)
     suspend fun <T : Parcelable?> execute(command: RootCommand<T>, classLoader: ClassLoader?): T {
         val result = CompletableDeferred<T>()
         @Suppress("UNCHECKED_CAST")
         val registered = send(command) {
-            Callback.Ordinary(this, it, classLoader, result as CompletableDeferred<Parcelable?>)
+            RootCommandCallback.Ordinary(classLoader, result as CompletableDeferred<Parcelable?>)
         }
         try {
             return result.await()
         } finally {
-            if (unregisterIfActive(registered)) cancelRemote(registered.id)
+            cancelRemote(registered.id, registered.callback)
         }
     }
 
@@ -373,7 +181,8 @@ class RootServer internal constructor() {
      * Each collection registers a new remote command and starts one root-side [RootFlow.flow] collection. Cancelling the
      * client collector unregisters that command and asks the root service to cancel its job. [capacity] and
      * [onBufferOverflow] configure the local response buffer. If the buffer rejects a root response, the remote command is
-     * cancelled and the client flow fails.
+     * cancelled and the client flow fails. Once command submission is accepted, collector cancellation is best-effort
+     * remote cancellation rather than a guarantee that the root flow has not started.
      */
     inline fun <T : Parcelable?, reified C : RootFlow<T>> flow(
         source: C,
@@ -387,7 +196,8 @@ class RootServer internal constructor() {
      * Each collection registers a new remote command and starts one root-side [RootFlow.flow] collection. Cancelling the
      * client collector unregisters that command and asks the root service to cancel its job. [capacity] and
      * [onBufferOverflow] configure the local response buffer. If the buffer rejects a root response, the remote command is
-     * cancelled and the client flow fails.
+     * cancelled and the client flow fails. Once command submission is accepted, collector cancellation is best-effort
+     * remote cancellation rather than a guarantee that the root flow has not started.
      */
     fun <T : Parcelable?> flow(
         source: RootFlow<T>,
@@ -396,131 +206,334 @@ class RootServer internal constructor() {
         onBufferOverflow: BufferOverflow = BufferOverflow.SUSPEND,
     ): Flow<T> = callbackFlow<T> {
         @Suppress("UNCHECKED_CAST")
+        val channel = this as SendChannel<Parcelable?>
         val registered = this@RootServer.send(source) {
-            Callback.Flow(this@RootServer, it, classLoader, this as SendChannel<Parcelable?>)
+            RootCommandCallback.Flow(classLoader, channel)
         }
-        awaitClose {
-            if (unregisterIfActive(registered)) cancelRemote(registered.id)
+        try {
+            awaitClose()
+        } finally {
+            cancelRemote(registered.id, registered.callback)
         }
     }.buffer(capacity, onBufferOverflow)
-
-    private fun send(command: Parcelable, factory: (Long) -> Callback): RegisteredCallback {
-        var serviceCallFailed = false
-        try {
-            return synchronized(callbackLookup) {
-                val remote = service ?: throw unavailableCauseLocked()
-                val id = counter++
-                val callback = factory(id)
-                try {
-                    val registered = RegisteredCallback(id, callback, remote)
-                    callbackLookup[id] = callback
-                    remote.execute(id, RootCommandRequest(command), this.callback)
-                    Logger.me.d("Sent #$id: $command")
-                    registered
-                } catch (e: Throwable) {
-                    callbackLookup.remove(id)
-                    callback.active = false
-                    callback.close(e)
-                    if (e is RemoteException) serviceCallFailed = true
-                    throw e
-                }
-            }
-        } catch (e: RemoteException) {
-            if (serviceCallFailed) closeAfterServiceCallFailure(e)
-            throw e
-        }
-    }
-
-    private fun unregisterIfActive(registered: RegisteredCallback) = synchronized(callbackLookup) {
-        if (!registered.callback.active) return@synchronized false
-        callbackLookup.remove(registered.id, registered.callback).also {
-            if (it) registered.callback.active = false
-        }
-    }
-
-    private fun cancelRemote(id: Long, commandCallback: Callback? = null) {
-        val remote = synchronized(callbackLookup) {
-            if (commandCallback != null && callbackLookup.remove(id, commandCallback)) {
-                commandCallback.active = false
-            }
-            service
-        } ?: return
-        try {
-            remote.cancel(id, callback)
-        } catch (e: RemoteException) {
-            closeAfterServiceCallFailure(e)
-        }
-    }
-
-    private fun closeAfterServiceCallFailure(cause: RemoteException) {
-        val (service, connection) = closeInternal(cause)
-        try {
-            service?.close(callback)
-        } catch (e: RemoteException) {
-            Logger.me.w("Root service close failed after Binder failure", e)
-        }
-        connection?.let {
-            runOnMain { unbind(it, "Root service unbind after Binder failure failed") }
-        }
-    }
-
-    private fun unavailableCauseLocked() = closeCause ?: UnexpectedExitException()
-
-    private fun closeInternal(cause: Throwable? = null): Pair<IRootCommandService?, ServiceConnection?> {
-        val pendingCallbacks = MutableObjectList<Callback>()
-        val binder: IBinder?
-        val ownership: RootProcessOwnership?
-        var completion = cause ?: CancellationException("Root server closed")
-        val snapshot = synchronized(callbackLookup) {
-            closeCause?.let { completion = it } ?: run { closeCause = completion }
-            val snapshot = service to serviceConnection
-            binder = serviceBinder
-            ownership = this.ownership
-            service = null
-            serviceConnection = null
-            serviceBinder = null
-            this.ownership = null
-            callbackLookup.forEachValue { pendingCallbacks.add(it) }
-            callbackLookup.clear()
-            snapshot
-        }
-        startupJob.cancel(completion.asCancellationException())
-        ownership?.close()
-        try {
-            binder?.unlinkToDeath(callback, 0)
-        } catch (e: RuntimeException) {
-            Logger.me.w("Failed to unlink root service death recipient", e)
-        }
-        pendingCallbacks.forEach { callback ->
-            callback.active = false
-            callback.close(completion)
-        }
-        return snapshot
-    }
 
     /**
      * Close the instance gracefully.
      */
     suspend fun close() {
         Logger.me.d("Shutting down from client")
-        val (service, connection) = closeInternal()
+        val cause = closeCause ?: CancellationException("Root server closed")
+        recordCloseCause(cause)
+        serverJob.cancel(cause.asCancellationException())
+        serverJob.join()
+    }
+
+    private suspend fun CoroutineScope.runLifecycle(
+        context: Context,
+        handleRootIo: suspend (ParcelFileDescriptor, ParcelFileDescriptor, ParcelFileDescriptor) -> Unit,
+    ) {
         try {
-            service?.close(callback)
-        } catch (e: RemoteException) {
-            Logger.me.w("Root service close failed", e)
+            bindRootService(context, handleRootIo)
+            launchStartupHandler(this)
+            receiveUntilConnected()
+            receiveUntilClosed()
+        } catch (e: Throwable) {
+            recordCloseCause(e)
+        } finally {
+            cleanup()
+            serverJob.complete()
         }
-        connection?.let {
-            withContext(NonCancellable + Dispatchers.Main.immediate) {
-                unbind(it, "Root service unbind failed")
+    }
+
+    private suspend fun bindRootService(
+        context: Context,
+        handleRootIo: suspend (ParcelFileDescriptor, ParcelFileDescriptor, ParcelFileDescriptor) -> Unit,
+    ) = withContext(Dispatchers.Main.immediate) {
+        val intent = Intent(context, RootCommandService::class.java)
+        val connection = createRootServiceConnection()
+        val startup = StartupBind(PendingRootServiceBind(intent), connection)
+        startupBind = startup
+        val task = try {
+            RootService.bindOrTask(
+                intent,
+                Dispatchers.Main.immediate.asExecutor(),
+                connection,
+            ).also {
+                if (it != null && startup.pending.ownsStartupIfQueued) {
+                    startup.pending.captureQueuedTask()
+                    startup.clearPending = true
+                }
+            }
+        } catch (e: Throwable) {
+            if (startup.pending.ownsStartupIfQueued) startup.clearPending = true
+            recordCloseCause(e)
+            null
+        }
+        if (task != null && closeCause == null) {
+            val rootOwnership = try {
+                RootProcessOwnership()
+            } catch (e: Throwable) {
+                if (startup.pending.ownsStartupIfQueued) startup.clearPending = true
+                recordCloseCause(e)
+                null
+            }
+            startup.ownership = rootOwnership
+            if (rootOwnership != null) {
+                startup.launcher = RootProcessLauncher(context, task, handleRootIo, rootOwnership.socketName)
             }
         }
     }
 
-    private fun runOnMain(block: () -> Unit) {
-        val dispatcher = Dispatchers.Main.immediate
-        if (dispatcher.isDispatchNeeded(EmptyCoroutineContext)) {
-            dispatcher.dispatch(EmptyCoroutineContext, Runnable { block() })
-        } else block()
+    private fun createRootServiceConnection() = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName, binder: IBinder) {
+            val remote = IRootCommandService.Stub.asInterface(binder)
+            try {
+                binder.linkToDeath(callback, 0)
+            } catch (e: RemoteException) {
+                if (!requestClose(e)) unbind(this, "Root service unbind after dead binding failed")
+                return
+            }
+            if (!trySendEvent(Event.Connected(this, binder, remote))) {
+                unlinkServiceDeathRecipient(binder, "Failed to unlink root service death recipient after closed bind")
+                closeRemoteService(remote, "Root service close failed after closed bind")
+                unbind(this, "Failed to unbind root service connection after closed bind")
+            }
+        }
+
+        override fun onServiceDisconnected(name: ComponentName) {
+            requestClose(UnexpectedExitException())
+        }
+
+        override fun onBindingDied(name: ComponentName) {
+            requestClose(UnexpectedExitException())
+        }
+
+        override fun onNullBinding(name: ComponentName) {
+            requestClose(IllegalStateException("Root service returned null binding"))
+        }
+    }
+
+    private fun launchStartupHandler(scope: CoroutineScope) {
+        val startup = startupBind ?: return
+        val launcher = startup.launcher
+        val acceptedOwnership = startup.ownership
+        if (launcher != null && acceptedOwnership != null) {
+            startupHandler = scope.launch {
+                try {
+                    launcher.run(
+                        rootServiceConnected,
+                        awaitStartupOwnership = { acceptedOwnership.accept() },
+                    )
+                } catch (e: Throwable) {
+                    if (e !is CancellationException) {
+                        trySendEvent(Event.StartupFailed(e))
+                    }
+                }
+            }
+        }
+    }
+
+    private suspend fun receiveUntilConnected() {
+        while (closeCause == null && connected == null) handleEvent(events.receive())
+    }
+
+    private suspend fun receiveUntilClosed() {
+        while (closeCause == null) handleEvent(events.receive())
+    }
+
+    @OptIn(DelicateCoroutinesApi::class)
+    private suspend fun handleEvent(event: Event) {
+        when (event) {
+            is Event.Connected -> handleConnected(event)
+            is Event.StartupFailed -> if (connected == null) {
+                startupBind?.clearPending = true
+                recordCloseCause(event.cause)
+            }
+            is Event.SendCommand -> sendCommand(event)
+            is Event.CancelRemote -> cancelRemoteOwned(event.id, event.callback)?.let(::recordCloseCause)
+        }
+    }
+
+    private suspend fun handleConnected(event: Event.Connected) {
+        if (connected == null && closeCause == null) {
+            connected = ConnectedRootService(event.connection, event.binder, event.service, startupBind?.ownership)
+            startupBind = null
+            rootServiceConnected.complete()
+            started.complete(Unit)
+        } else {
+            closeBoundRootService(event.connection, event.binder, event.service, "after cancelled bind")
+        }
+    }
+
+    private fun handleResponse(id: Long, response: RootCommandResponse) {
+        val handling = synchronized(lifecycleLock) {
+            if (closeCause == null) commandCallbacks.handleResponse(id, response) else RootCommandResponseHandling.Done
+        }
+        if (handling == RootCommandResponseHandling.CancelRemote) cancelRemoteSubmitted(id)?.let(::requestClose)
+    }
+
+    private fun sendCommand(event: Event.SendCommand) {
+        val remote = connected?.service
+        if (remote == null) {
+            event.result.completeExceptionally(unavailableCause())
+            return
+        }
+        val registered = try {
+            commandCallbacks.register(event.factory)
+        } catch (e: Throwable) {
+            event.result.completeExceptionally(e)
+            return
+        }
+        try {
+            remote.execute(registered.id, RootCommandRequest(event.command), callback)
+            Logger.me.d("Sent #${registered.id}: ${event.command}")
+            event.result.complete(registered)
+        } catch (e: Throwable) {
+            commandCallbacks.unregister(registered.id, registered.callback)
+            registered.callback.close(e)
+            event.result.completeExceptionally(e)
+            if (e is RemoteException) recordCloseCause(e)
+        }
+    }
+
+    private fun cancelRemoteOwned(id: Long, commandCallback: RootCommandCallback? = null): RemoteException? {
+        if (!commandCallbacks.unregister(id, commandCallback)) return null
+        return cancelRemoteSubmitted(id)
+    }
+
+    private fun cancelRemoteSubmitted(id: Long): RemoteException? {
+        val remote = connected?.service ?: return null
+        if (!active) return null
+        return try {
+            remote.cancel(id)
+            null
+        } catch (e: RemoteException) {
+            e
+        }
+    }
+
+    private fun connectedServiceOrThrow(): IRootCommandService {
+        val remote = connected?.service
+        if (remote == null || !active) {
+            throw unavailableCause()
+        }
+        return remote
+    }
+
+    // Non-suspending Binder/service callbacks record the terminal state first, then cancel the server lifetime.
+    private fun requestClose(cause: Throwable): Boolean {
+        if (!recordCloseCause(cause)) return false
+        serverJob.cancel(cause.asCancellationException())
+        return true
+    }
+
+    private fun recordCloseCause(cause: Throwable): Boolean = synchronized(lifecycleLock) {
+        if (closeCause == null) {
+            closeCause = cause
+            true
+        } else {
+            false
+        }
+    }
+
+    private suspend fun cleanup() {
+        val cause = closeCause ?: CancellationException("Root server closed")
+        val connected = connected
+        val pendingStartup = startupBind
+        var pendingConnection = pendingStartup?.connection
+        recordCloseCause(cause)
+        rootServiceConnected.cancel(cause.asCancellationException())
+        events.close(cause)
+        val queuedEvents = ArrayList<Event>()
+        while (true) {
+            val event = events.tryReceive().getOrNull() ?: break
+            queuedEvents.add(event)
+        }
+        if (!started.isCompleted) {
+            if (cause is CancellationException) started.cancel(cause)
+            else started.completeExceptionally(cause)
+        }
+        val startupHandler = startupHandler
+        startupHandler?.cancel(cause.asCancellationException())
+        withContext(NonCancellable) {
+            queuedEvents.forEach { event ->
+                when (event) {
+                    is Event.Connected -> {
+                        if (pendingConnection === event.connection) pendingConnection = null
+                        closeBoundRootService(event.connection, event.binder, event.service, "after closed bind")
+                    }
+                    is Event.SendCommand -> event.result.completeExceptionally(cause)
+                    else -> Unit
+                }
+            }
+            startupHandler?.join()
+            if (pendingStartup?.clearPending == true) withContext(Dispatchers.Main.immediate) {
+                try {
+                    pendingStartup.pending.cancel()
+                } catch (e: Throwable) {
+                    Logger.me.w("Failed to clean up libsu pending RootService bind", e)
+                }
+            }
+            (connected?.ownership ?: pendingStartup?.ownership)?.close()
+            commandCallbacks.closeAll(cause)
+            if (connected == null) pendingConnection?.let {
+                withContext(Dispatchers.Main.immediate) {
+                    unbind(it, "Root service unbind failed")
+                }
+            } else {
+                closeBoundRootService(connected.connection, connected.binder, connected.service, "during cleanup")
+            }
+            this@RootServer.connected = null
+            startupBind = null
+            this@RootServer.startupHandler = null
+        }
+    }
+
+    private suspend fun closeBoundRootService(
+        connection: ServiceConnection,
+        binder: IBinder,
+        service: IRootCommandService,
+        reason: String,
+    ) {
+        unlinkServiceDeathRecipient(binder, "Failed to unlink root service death recipient $reason")
+        closeRemoteService(service, "Failed to close root service $reason")
+        withContext(Dispatchers.Main.immediate) {
+            unbind(connection, "Failed to unbind root service connection $reason")
+        }
+    }
+
+    private fun closeRemoteService(service: IRootCommandService, message: String) {
+        try {
+            service.close()
+        } catch (e: RemoteException) {
+            Logger.me.w(message, e)
+        }
+    }
+
+    private suspend fun send(
+        command: Parcelable,
+        factory: (Long) -> RootCommandCallback,
+    ): RegisteredRootCommandCallback {
+        val result = CompletableDeferred<RegisteredRootCommandCallback>()
+        if (!trySendClientEvent(Event.SendCommand(command, factory, result))) throw unavailableCause()
+        // After the event is accepted, cancellation must wait for the id needed to cancel remote work.
+        return withContext(NonCancellable) { result.await() }
+    }
+
+    private fun cancelRemote(id: Long, commandCallback: RootCommandCallback? = null) {
+        trySendEvent(Event.CancelRemote(id, commandCallback))
+    }
+
+    private fun trySendClientEvent(event: Event) = active && trySendEvent(event)
+
+    private fun trySendEvent(event: Event) = events.trySend(event).isSuccess
+
+    private fun unlinkServiceDeathRecipient(binder: IBinder, message: String) {
+        try {
+            binder.unlinkToDeath(callback, 0)
+        } catch (e: RuntimeException) {
+            Logger.me.w(message, e)
+        }
     }
 
     private fun unbind(connection: ServiceConnection, message: String) {
@@ -530,6 +543,8 @@ class RootServer internal constructor() {
             Logger.me.w(message, e)
         }
     }
+
+    private fun unavailableCause() = closeCause ?: UnexpectedExitException()
 
     private companion object {
         fun Throwable.asCancellationException() = when (this) {

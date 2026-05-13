@@ -68,37 +68,37 @@ abstract class RootSession {
     private val mutex = Mutex()
     private val timeoutScope by lazy { CoroutineScope(SupervisorJob() + timeoutDispatcher) }
     private var server: RootServer? = null
-    private var startup: CompletableDeferred<Unit>? = null
+    private var startupBarrier: CompletableDeferred<Unit>? = null
     private var timeoutJob: Job? = null
-    private var usersCount = 0L
-    private var closePending = false
+    private var leaseCount = 0L
+    private var closeOnRelease = false
 
     suspend fun acquire(): RootServer {
         while (true) {
             var activeServer: RootServer? = null
-            var startupToAwait: CompletableDeferred<Unit>? = null
+            var startupBarrierToAwait: CompletableDeferred<Unit>? = null
             var shouldStart = false
             mutex.withLock {
                 server?.let {
                     haltTimeoutLocked()
                     if (it.active) {
-                        ++usersCount
+                        ++leaseCount
                         activeServer = it
                         return@withLock
                     }
-                    usersCount = 0
+                    leaseCount = 0
                     withContext(NonCancellable) { closeLocked() }
                 }
-                check(usersCount == 0L) { "Unexpected $server, $usersCount" }
-                startup?.let { startupToAwait = it } ?: run {
+                check(leaseCount == 0L) { "Unexpected $server, $leaseCount" }
+                startupBarrier?.let { startupBarrierToAwait = it } ?: run {
                     haltTimeoutLocked()
-                    closePending = false
-                    startup = CompletableDeferred()
+                    closeOnRelease = false
+                    startupBarrier = CompletableDeferred()
                     shouldStart = true
                 }
             }
             activeServer?.let { return it }
-            startupToAwait?.await()
+            startupBarrierToAwait?.await()
             if (shouldStart) return startServer()
         }
     }
@@ -108,17 +108,17 @@ abstract class RootSession {
         try {
             val server = createServer()
             created = server
-            val startup = mutex.withLock {
-                check(this.server == null && usersCount == 0L) { "Unexpected ${this.server}, $usersCount" }
+            val startupBarrier = mutex.withLock {
+                check(this.server == null && leaseCount == 0L) { "Unexpected ${this.server}, $leaseCount" }
                 this.server = server
-                ++usersCount
+                ++leaseCount
                 created = null
                 finishStartupLocked()
             }
-            startup?.complete(Unit)
+            startupBarrier?.complete(Unit)
             return server
         } catch (e: Throwable) {
-            val startup = withContext(NonCancellable) {
+            val startupBarrier = withContext(NonCancellable) {
                 created?.let {
                     try {
                         it.close()
@@ -129,15 +129,15 @@ abstract class RootSession {
                 mutex.withLock { finishStartupLocked() }
             }
             if (e is CancellationException) {
-                startup?.complete(Unit)
+                startupBarrier?.complete(Unit)
             } else {
-                startup?.completeExceptionally(e)
+                startupBarrier?.completeExceptionally(e)
             }
             throw e
         }
     }
 
-    private fun finishStartupLocked() = startup.also { startup = null }
+    private fun finishStartupLocked() = startupBarrier.also { startupBarrier = null }
 
     private suspend fun createServer(): RootServer {
         val server = RootServer()
@@ -156,7 +156,7 @@ abstract class RootSession {
     }
 
     private suspend fun closeLocked() {
-        closePending = false
+        closeOnRelease = false
         val server = server
         this.server = null
         server?.close()
@@ -167,10 +167,12 @@ abstract class RootSession {
             delay(timeout)
             mutex.withLock {
                 ensureActive()
-                check(usersCount == 0L)
+                check(leaseCount == 0L)
                 timeoutJob = null
                 try {
                     closeLocked()
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Throwable) {
                     Logger.me.w("Root server timeout close failed", e)
                 }
@@ -184,15 +186,15 @@ abstract class RootSession {
     suspend fun release(server: RootServer) = withContext(NonCancellable) {
         mutex.withLock {
             if (this@RootSession.server != server) return@withLock  // outdated reference
-            require(usersCount > 0)
+            require(leaseCount > 0)
             when {
                 !server.active -> {
-                    usersCount = 0
+                    leaseCount = 0
                     closeLocked()
                     return@withLock
                 }
-                --usersCount > 0L -> return@withLock
-                closePending -> closeLocked()
+                --leaseCount > 0L -> return@withLock
+                closeOnRelease -> closeLocked()
                 else -> startTimeoutLocked()
             }
         }
@@ -207,7 +209,7 @@ abstract class RootSession {
     }
 
     suspend fun closeExisting() = mutex.withLock {
-        if (usersCount > 0 || startup != null) closePending = true else {
+        if (leaseCount > 0 || startupBarrier != null) closeOnRelease = true else {
             haltTimeoutLocked()
             closeLocked()
         }

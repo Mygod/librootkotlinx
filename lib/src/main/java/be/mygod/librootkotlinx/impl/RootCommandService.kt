@@ -4,8 +4,6 @@ import android.content.Intent
 import android.os.IBinder
 import android.os.Parcelable
 import android.os.RemoteException
-import androidx.collection.MutableLongObjectMap
-import androidx.collection.MutableObjectList
 import be.mygod.librootkotlinx.Logger
 import be.mygod.librootkotlinx.ParcelableThrowable
 import be.mygod.librootkotlinx.RootCommand
@@ -18,7 +16,6 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
@@ -29,7 +26,7 @@ internal class RootCommandService : RootService() {
     private val serviceJob = SupervisorJob()
     private val commandScope = CoroutineScope(Dispatchers.Main.immediate + serviceJob)
     private val callbackDispatcher = Dispatchers.Default.limitedParallelism(1)
-    private val cancellables = MutableLongObjectMap<Job>()
+    private val commandJobs = RootCommandJobs()
 
     override fun onBind(intent: Intent): IBinder {
         systemContext = this
@@ -72,11 +69,11 @@ internal class RootCommandService : RootService() {
             }
         }
 
-        override fun cancel(id: Long, callback: IRootCommandCallback) {
-            synchronized(this@RootCommandService) { cancellables[id] }?.cancel()
+        override fun cancel(id: Long) {
+            commandJobs.cancel(id)
         }
 
-        override fun close(callback: IRootCommandCallback) = cancelAll()
+        override fun close() = commandJobs.cancelAll()
     }
 
     private fun launchCancellable(id: Long, callback: IRootCommandCallback, block: suspend CoroutineScope.() -> Unit) {
@@ -88,17 +85,8 @@ internal class RootCommandService : RootService() {
                 callback.trySendThrowable(id, e)
             }
         }
-        synchronized(this) { cancellables[id] = commandJob }
-        commandJob.invokeOnCompletion {
-            synchronized(this@RootCommandService) { cancellables.remove(id, commandJob) }
-        }
+        commandJobs.track(id, commandJob)
         commandJob.start()
-    }
-
-    private fun cancelAll() {
-        val jobs = MutableObjectList<Job>()
-        synchronized(this) { cancellables.forEachValue { jobs.add(it) } }
-        jobs.forEach { it.cancel() }
     }
 
     private suspend fun IRootCommandCallback.trySendThrowable(id: Long, throwable: Throwable) {
@@ -110,7 +98,7 @@ internal class RootCommandService : RootService() {
             })
         } catch (e: RemoteException) {
             Logger.me.w("Failed to deliver root command failure #$id", e)
-            cancelAll()
+            commandJobs.cancelAll()
         }
     }
 

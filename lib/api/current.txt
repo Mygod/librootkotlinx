@@ -280,7 +280,7 @@ package be.mygod.librootkotlinx {
   public final class RootServer {
     method public suspend Object? close(kotlin.coroutines.Continuation<? super kotlin.Unit>);
     method @kotlin.jvm.Throws(exceptionClasses=RemoteException::class) public suspend <T extends android.os.Parcelable> Object? execute(be.mygod.librootkotlinx.RootCommand<T> command, ClassLoader? classLoader, kotlin.coroutines.Continuation<? super T>) throws android.os.RemoteException;
-    method @kotlinx.coroutines.DelicateCoroutinesApi public void execute(be.mygod.librootkotlinx.RootCommandOneWay command);
+    method @kotlin.jvm.Throws(exceptionClasses=RemoteException::class) @kotlinx.coroutines.DelicateCoroutinesApi public void execute(be.mygod.librootkotlinx.RootCommandOneWay command) throws android.os.RemoteException;
     method @KotlinOnly @kotlin.jvm.Throws(exceptionClasses={android.os.RemoteException.class}) public suspend inline <T extends android.os.Parcelable, reified C extends be.mygod.librootkotlinx.RootCommand<T>> Object? execute(C command, kotlin.coroutines.Continuation<? super T>) throws android.os.RemoteException;
     method public <T extends android.os.Parcelable> kotlinx.coroutines.flow.Flow<T> flow(be.mygod.librootkotlinx.RootFlow<T> source, ClassLoader? classLoader, optional int capacity, optional kotlinx.coroutines.channels.BufferOverflow onBufferOverflow);
     method @KotlinOnly public inline <T extends android.os.Parcelable, reified C extends be.mygod.librootkotlinx.RootFlow<T>> kotlinx.coroutines.flow.Flow<T> flow(C source, optional int capacity, optional kotlinx.coroutines.channels.BufferOverflow onBufferOverflow);
@@ -320,13 +320,13 @@ package be.mygod.librootkotlinx {
 package be.mygod.librootkotlinx.io {
 
   public final class FileDescriptorChannels {
-    method public static suspend Object? forEachLine(io.ktor.utils.io.ByteReadChannel, kotlin.jvm.functions.Function1<? super java.lang.String,kotlin.Unit> block, kotlin.coroutines.Continuation<? super kotlin.Unit>);
     method @InaccessibleFromKotlin public static boolean isNonblocking(java.io.FileDescriptor);
     method public static io.ktor.utils.io.ByteReadChannel openReadChannel(android.os.ParcelFileDescriptor, android.os.Handler handler, optional byte[] buffer);
     method public static io.ktor.utils.io.ByteReadChannel openReadChannel(java.io.FileDescriptor, android.os.Handler handler, optional byte[] buffer);
     method public static io.ktor.utils.io.ByteWriteChannel openWriteChannel(android.os.ParcelFileDescriptor, android.os.Handler handler, optional byte[] buffer);
     method public static io.ktor.utils.io.ByteWriteChannel openWriteChannel(java.io.FileDescriptor, android.os.Handler handler, optional byte[] buffer);
     method @InaccessibleFromKotlin public static void setNonblocking(java.io.FileDescriptor, boolean);
+    method public static suspend Object? useLines(io.ktor.utils.io.ByteReadChannel, kotlin.jvm.functions.Function1<? super java.lang.String,kotlin.Unit> block, kotlin.coroutines.Continuation<? super kotlin.Unit>);
     property public static boolean java.io.FileDescriptor.isNonblocking;
   }
 

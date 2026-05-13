@@ -1,5 +1,8 @@
 package be.mygod.librootkotlinx
 
+import android.content.ComponentName
+import android.content.ServiceConnection
+import android.os.IBinder
 import be.mygod.librootkotlinx.impl.IRootCommandService
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Deferred
@@ -25,6 +28,7 @@ import org.junit.Assert.fail
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
+import java.lang.reflect.Method
 import java.lang.reflect.Proxy
 import kotlin.time.Duration.Companion.seconds
 
@@ -235,12 +239,40 @@ class RootSessionTest {
     }
 
     private fun RootServer.markActive() {
-        RootServer::class.java.getDeclaredField("service").apply {
+        val connectedClass = RootServer::class.java.declaredClasses.single {
+            it.simpleName == "ConnectedRootService"
+        }
+        val connected = connectedClass.declaredConstructors.single().let {
+            it.isAccessible = true
+            it.newInstance(NoOpServiceConnection, proxy(IBinder::class.java), proxy(IRootCommandService::class.java), null)
+        }
+        RootServer::class.java.getDeclaredField("connected").apply {
             isAccessible = true
-            set(this@markActive, Proxy.newProxyInstance(
-                IRootCommandService::class.java.classLoader,
-                arrayOf(IRootCommandService::class.java),
-            ) { _, _, _ -> null })
+            set(this@markActive, connected)
+        }
+    }
+
+    private object NoOpServiceConnection : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName, service: IBinder) = Unit
+        override fun onServiceDisconnected(name: ComponentName) = Unit
+    }
+
+    private companion object {
+        fun <T : Any> proxy(type: Class<T>): T = checkNotNull(type.cast(Proxy.newProxyInstance(
+            type.classLoader,
+            arrayOf(type),
+        ) { _, method, _ -> defaultValue(method) }))
+
+        fun defaultValue(method: Method): Any? = when (method.returnType) {
+            java.lang.Boolean.TYPE -> false
+            java.lang.Byte.TYPE -> 0.toByte()
+            java.lang.Character.TYPE -> 0.toChar()
+            java.lang.Short.TYPE -> 0.toShort()
+            java.lang.Integer.TYPE -> 0
+            java.lang.Long.TYPE -> 0L
+            java.lang.Float.TYPE -> 0F
+            java.lang.Double.TYPE -> 0.0
+            else -> null
         }
     }
 }

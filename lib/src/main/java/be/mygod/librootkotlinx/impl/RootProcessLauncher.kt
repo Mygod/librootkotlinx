@@ -43,16 +43,57 @@ internal class RootProcessLauncher(
     private val ownershipSocketName: String,
 ) {
     suspend fun run(
-        handlerScope: CoroutineScope,
-        startupComplete: Job,
+        rootServiceConnected: Job,
         awaitStartupOwnership: suspend () -> Unit = {},
-        onStartupCommandFailed: () -> Unit = {},
-        onStartupCommandSubmitted: () -> Unit = {},
-        onStartupStarted: () -> Unit = {},
     ) = coroutineScope {
         val eventHandler = Handler(Looper.getMainLooper())
         val stdio = Stdio()
         val handlerStdio = stdio.takeHandlerStdio()
+        val handlerCompletion = startRootIoHandler(this, handlerStdio)
+        try {
+            val shell = runInterruptible(Dispatchers.IO) { Shell.getShell() }
+            if (!shell.isRoot) throw NoShellException("Root shell is not available")
+
+            val startupNonce = UUID.randomUUID().toString()
+            runInterruptible(Dispatchers.IO) {
+                val command = createStartupCommand(stdio, startupNonce)
+                // Job.exec waits for the foreground wrapper to open fd 3 before the app closes its marker writer.
+                val result = shell.newJob().add(command).to(null, null).exec()
+                if (result.code == Shell.Result.JOB_NOT_EXECUTED) {
+                    throw NoShellException("Root shell died before starting root service")
+                }
+                if (!result.isSuccess) throw IOException("Root service startup command failed with exit code ${result.code}")
+            }
+            stdio.closeMarkerWrite()
+            awaitStartupMarker(stdio, startupNonce, eventHandler)
+            val ownershipAccepted = async { awaitStartupOwnership() }
+            select {
+                ownershipAccepted.onAwait { }
+                handlerCompletion.onAwait { throw RootIoExitException(it) }
+            }
+            stdio.closeRemaining()
+
+            currentCoroutineContext().ensureActive()
+            var handlerCompleted = false
+            var handlerFailure: Throwable? = null
+            select {
+                rootServiceConnected.onJoin { }
+                handlerCompletion.onAwait {
+                    handlerCompleted = true
+                    handlerFailure = it
+                }
+            }
+            if (handlerCompleted && !rootServiceConnected.isCompleted) throw RootIoExitException(handlerFailure)
+            handlerCompletion.await()
+        } finally {
+            stdio.closeRemaining()
+        }
+    }
+
+    private fun startRootIoHandler(
+        handlerScope: CoroutineScope,
+        handlerStdio: HandlerStdio,
+    ): CompletableDeferred<Throwable?> {
         val handlerCompletion = CompletableDeferred<Throwable?>()
         handlerScope.launch {
             var failure: Throwable? = null
@@ -72,55 +113,7 @@ internal class RootProcessLauncher(
             handlerStdio.close()
             handlerCompletion.complete(it)
         }
-        var startupCommandSubmitted = false
-        try {
-            val shell = runInterruptible(Dispatchers.IO) { Shell.getShell() }
-            if (!shell.isRoot) throw NoShellException("Root shell is not available")
-
-            val startupNonce = UUID.randomUUID().toString()
-            runInterruptible(Dispatchers.IO) {
-                val command = createStartupCommand(stdio, startupNonce)
-                // Job.exec waits for the foreground wrapper to open fd 3 before the app closes its marker writer.
-                val result = shell.newJob().add(command).to(null, null).exec()
-                if (result.code == Shell.Result.JOB_NOT_EXECUTED) {
-                    throw NoShellException("Root shell died before starting root service")
-                }
-                if (!result.isSuccess) throw IOException("Root service startup command failed with exit code ${result.code}")
-            }
-            startupCommandSubmitted = true
-            onStartupCommandSubmitted()
-            stdio.closeMarkerWrite()
-            try {
-                awaitStartupMarker(stdio, startupNonce, eventHandler)
-            } catch (e: Throwable) {
-                if (currentCoroutineContext().isActive) onStartupCommandFailed()
-                throw e
-            }
-            val ownershipAccepted = async { awaitStartupOwnership() }
-            select {
-                ownershipAccepted.onAwait { }
-                handlerCompletion.onAwait { throw RootIoExitException(it) }
-            }
-            stdio.closeRemaining()
-
-            onStartupStarted()
-            currentCoroutineContext().ensureActive()
-            var handlerCompleted = false
-            var handlerFailure: Throwable? = null
-            select {
-                startupComplete.onJoin { }
-                handlerCompletion.onAwait {
-                    handlerCompleted = true
-                    handlerFailure = it
-                }
-            }
-            if (handlerCompleted && !startupComplete.isCompleted) throw RootIoExitException(handlerFailure)
-        } catch (e: CancellationException) {
-            if (!startupCommandSubmitted) onStartupCommandFailed()
-            throw e
-        } finally {
-            stdio.closeRemaining()
-        }
+        return handlerCompletion
     }
 
     private fun createStartupCommand(stdio: Stdio, startupNonce: String): String {

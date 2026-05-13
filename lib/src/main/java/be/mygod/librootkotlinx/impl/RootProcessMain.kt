@@ -40,12 +40,17 @@ internal object RootProcessMain {
             // https://github.com/topjohnwu/libsu/blob/8314fa2f48b8421cdb1d38c472c518167b1cba9d/service/jar/src/main/java/com/topjohnwu/superuser/internal/RootServerMain.java#L70-L88
             @Suppress("DEPRECATION")
             Looper.prepareMainLooper()
-            monitorOwnership(ownership)
-            val rootServerMain = Class.forName("com.topjohnwu.superuser.internal.RootServerMain")
-            val constructor = rootServerMain.getDeclaredConstructor(Array<String>::class.java)
-            constructor.isAccessible = true
-            constructor.newInstance(args as Any)
-            Looper.loop()
+            val processJob = SupervisorJob()
+            try {
+                monitorOwnership(ownership, CoroutineScope(processJob + Dispatchers.Main.immediate))
+                val rootServerMain = Class.forName("com.topjohnwu.superuser.internal.RootServerMain")
+                val constructor = rootServerMain.getDeclaredConstructor(Array<String>::class.java)
+                constructor.isAccessible = true
+                constructor.newInstance(args as Any)
+                Looper.loop()
+            } finally {
+                processJob.cancel()
+            }
         } catch (e: Throwable) {
             Log.e(TAG, "Error in RootProcessMain", e)
             e.printStackTrace()
@@ -72,20 +77,23 @@ internal object RootProcessMain {
         }
     }
 
-    private fun monitorOwnership(socket: LocalSocket) {
+    private fun monitorOwnership(socket: LocalSocket, scope: CoroutineScope) {
         val handler = Handler(Looper.getMainLooper())
-        CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate).launch {
+        scope.launch {
             val channel = ALocalSocket(socket, handler).openReadChannel()
+            var ownershipLost = false
             try {
                 channel.discard()
                 Log.w(TAG, "Root process ownership revoked")
+                ownershipLost = true
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
                 Log.w(TAG, "Root process ownership monitor failed", e)
+                ownershipLost = true
             } finally {
                 channel.cancel(null)
-                exitProcess(0)
+                if (ownershipLost) exitProcess(0)
             }
         }
     }

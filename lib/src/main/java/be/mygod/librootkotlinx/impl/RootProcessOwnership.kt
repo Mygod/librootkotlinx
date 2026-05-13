@@ -30,16 +30,15 @@ internal class RootProcessOwnership : Closeable {
                     close(accepted)
                     continue
                 }
-                synchronized(this) {
-                    if (closed.get() || socket != null) true else {
+                val acceptedByOwner = synchronized(this) {
+                    if (closed.get() || socket != null) false else {
                         socket = accepted
-                        false
+                        true
                     }
-                }.also {
-                    if (it) {
-                        accepted.close()
-                        throw CancellationException("Root process ownership closed")
-                    }
+                }
+                if (!acceptedByOwner) {
+                    accepted.close()
+                    throw CancellationException("Root process ownership closed")
                 }
                 closeServerSocket()
                 return
