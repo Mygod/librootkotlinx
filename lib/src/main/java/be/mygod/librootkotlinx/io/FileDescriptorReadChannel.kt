@@ -34,19 +34,19 @@ internal abstract class FileDescriptorReadChannel(
     private val buffer: ByteArray,
     private val channel: ByteChannel = ByteChannel(autoFlush = true),
 ) : ByteReadChannel by channel {
-    private val defaultEventAwaiter = lazy { FileDescriptorEventAwaiter(fileDescriptor, handler.looper.queue) }
     private val closed = AtomicBoolean()
     private val drainLock = Mutex()
     @Volatile
     private var drainFailure: Throwable? = null
     private val drainJob: Job
+    protected abstract val eventAwaiter: FileDescriptorEventAwaiter
 
     init {
         fileDescriptor.isNonblocking = true
         drainJob = CoroutineScope(handler.asCoroutineDispatcher("pfd-reader")).launch {
             try {
                 while (drainAvailable()) {
-                    awaitEvent(input = true)
+                    eventAwaiter.await(input = true)
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -128,16 +128,8 @@ internal abstract class FileDescriptorReadChannel(
         }
     }
 
-    protected open val eventAwaiter: FileDescriptorEventAwaiter
-        get() = defaultEventAwaiter.value
-
-    protected open suspend fun awaitEvent(input: Boolean) = eventAwaiter.await(input)
-
-    protected open fun closeEvents() {
-        if (defaultEventAwaiter.isInitialized()) defaultEventAwaiter.value.close()
-    }
-
     protected abstract fun closeDescriptor()
+    protected open fun closeEvents() = eventAwaiter.close()
 }
 
 /**
@@ -150,8 +142,12 @@ internal abstract class FileDescriptorReadChannel(
 fun ParcelFileDescriptor.openReadChannel(
     handler: Handler,
     buffer: ByteArray = ByteArray(DEFAULT_BUFFER_SIZE),
-): ByteReadChannel = object : FileDescriptorReadChannel(fileDescriptor, handler, buffer) {
-    override fun closeDescriptor() = close()
+): ByteReadChannel {
+    val awaiter = FileDescriptorEventAwaiter(fileDescriptor, handler.looper.queue)
+    return object : FileDescriptorReadChannel(fileDescriptor, handler, buffer) {
+        override val eventAwaiter get() = awaiter
+        override fun closeDescriptor() = close()
+    }
 }
 
 /**
@@ -164,12 +160,16 @@ fun ParcelFileDescriptor.openReadChannel(
 fun FileDescriptor.openReadChannel(
     handler: Handler,
     buffer: ByteArray = ByteArray(DEFAULT_BUFFER_SIZE),
-): ByteReadChannel = object : FileDescriptorReadChannel(this, handler, buffer) {
-    override fun closeDescriptor() {
-        try {
-            Os.close(this@openReadChannel)
-        } catch (e: ErrnoException) {
-            throw IOException(e)
+): ByteReadChannel {
+    val awaiter = FileDescriptorEventAwaiter(this, handler.looper.queue)
+    return object : FileDescriptorReadChannel(this, handler, buffer) {
+        override val eventAwaiter get() = awaiter
+        override fun closeDescriptor() {
+            try {
+                Os.close(this@openReadChannel)
+            } catch (e: ErrnoException) {
+                throw IOException(e)
+            }
         }
     }
 }

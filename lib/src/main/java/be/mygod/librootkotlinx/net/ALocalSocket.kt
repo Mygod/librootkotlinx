@@ -36,8 +36,8 @@ class ALocalSocket(val socket: LocalSocket, private val handler: Handler) : Clos
         check(readChannel == null) { "Read channel already opened" }
         object : FileDescriptorReadChannel(socket.fileDescriptor, handler, buffer) {
             override val eventAwaiter get() = this@ALocalSocket.eventAwaiter
-            override fun closeEvents() { }
             override fun closeDescriptor() = socket.shutdownInput()
+            override fun closeEvents() { }
         }.also { readChannel = it }
     }
 
@@ -52,8 +52,8 @@ class ALocalSocket(val socket: LocalSocket, private val handler: Handler) : Clos
         check(writeChannel == null) { "Write channel already opened" }
         object : FileDescriptorWriteChannel(socket.fileDescriptor, handler, buffer) {
             override val eventAwaiter get() = this@ALocalSocket.eventAwaiter
-            override fun closeEvents() { }
             override fun closeDescriptor() = socket.shutdownOutput()
+            override fun closeEvents() { }
         }.also { writeChannel = it }
     }
 

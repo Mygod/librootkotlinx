@@ -30,9 +30,9 @@ internal abstract class FileDescriptorWriteChannel(
     private val buffer: ByteArray,
     private val channel: ByteChannel = ByteChannel(),
 ) : ByteWriteChannel by channel {
-    private val defaultEventAwaiter = lazy { FileDescriptorEventAwaiter(fileDescriptor, handler.looper.queue) }
     private val closed = AtomicBoolean()
     private val drainJob: Deferred<Unit>
+    protected abstract val eventAwaiter: FileDescriptorEventAwaiter
 
     init {
         fileDescriptor.isNonblocking = true
@@ -49,7 +49,7 @@ internal abstract class FileDescriptorWriteChannel(
                         } catch (e: ErrnoException) {
                             when (e.errno) {
                                 OsConstants.EAGAIN -> {
-                                    awaitEvent(input = false)
+                                    eventAwaiter.await(input = false)
                                     continue
                                 }
                                 OsConstants.EINTR -> continue
@@ -59,7 +59,7 @@ internal abstract class FileDescriptorWriteChannel(
                         if (written > 0) {
                             offset += written
                         } else {
-                            awaitEvent(input = false)
+                            eventAwaiter.await(input = false)
                         }
                     }
                 }
@@ -109,15 +109,7 @@ internal abstract class FileDescriptorWriteChannel(
         }
     }
 
-    protected open val eventAwaiter: FileDescriptorEventAwaiter
-        get() = defaultEventAwaiter.value
-
-    protected open suspend fun awaitEvent(input: Boolean) = eventAwaiter.await(input)
-
-    protected open fun closeEvents() {
-        if (defaultEventAwaiter.isInitialized()) defaultEventAwaiter.value.close()
-    }
-
+    protected open fun closeEvents() = eventAwaiter.close()
     protected abstract fun closeDescriptor()
 }
 
@@ -131,8 +123,12 @@ internal abstract class FileDescriptorWriteChannel(
 fun ParcelFileDescriptor.openWriteChannel(
     handler: Handler,
     buffer: ByteArray = ByteArray(DEFAULT_BUFFER_SIZE),
-): ByteWriteChannel = object : FileDescriptorWriteChannel(fileDescriptor, handler, buffer) {
-    override fun closeDescriptor() = close()
+): ByteWriteChannel {
+    val awaiter = FileDescriptorEventAwaiter(fileDescriptor, handler.looper.queue)
+    return object : FileDescriptorWriteChannel(fileDescriptor, handler, buffer) {
+        override val eventAwaiter get() = awaiter
+        override fun closeDescriptor() = close()
+    }
 }
 
 /**
@@ -145,12 +141,16 @@ fun ParcelFileDescriptor.openWriteChannel(
 fun FileDescriptor.openWriteChannel(
     handler: Handler,
     buffer: ByteArray = ByteArray(DEFAULT_BUFFER_SIZE),
-): ByteWriteChannel = object : FileDescriptorWriteChannel(this, handler, buffer) {
-    override fun closeDescriptor() {
-        try {
-            Os.close(this@openWriteChannel)
-        } catch (e: ErrnoException) {
-            throw IOException(e)
+): ByteWriteChannel {
+    val awaiter = FileDescriptorEventAwaiter(this, handler.looper.queue)
+    return object : FileDescriptorWriteChannel(this, handler, buffer) {
+        override val eventAwaiter get() = awaiter
+        override fun closeDescriptor() {
+            try {
+                Os.close(this@openWriteChannel)
+            } catch (e: ErrnoException) {
+                throw IOException(e)
+            }
         }
     }
 }

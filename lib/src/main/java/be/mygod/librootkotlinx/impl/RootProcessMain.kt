@@ -5,7 +5,7 @@ import android.net.LocalSocketAddress
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import be.mygod.librootkotlinx.io.openReadChannel
+import be.mygod.librootkotlinx.net.ALocalSocket
 import io.ktor.utils.io.discard
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -75,7 +75,7 @@ internal object RootProcessMain {
     private fun monitorOwnership(socket: LocalSocket) {
         val handler = Handler(Looper.getMainLooper())
         CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate).launch {
-            val channel = socket.fileDescriptor.openReadChannel(handler)
+            val channel = ALocalSocket(socket, handler).openReadChannel()
             try {
                 channel.discard()
                 Log.w(TAG, "Root process ownership revoked")
