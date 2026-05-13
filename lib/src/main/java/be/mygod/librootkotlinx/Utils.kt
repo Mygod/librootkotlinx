@@ -5,7 +5,6 @@ package be.mygod.librootkotlinx
 import android.annotation.SuppressLint
 import android.content.Context
 import android.os.IBinder
-import android.os.Parcel
 import android.os.Parcelable
 import android.util.Size
 import android.util.SizeF
@@ -13,7 +12,6 @@ import android.util.SparseArray
 import android.util.SparseBooleanArray
 import android.util.SparseIntArray
 import android.util.SparseLongArray
-import androidx.annotation.RequiresApi
 import kotlinx.parcelize.Parcelize
 
 /**

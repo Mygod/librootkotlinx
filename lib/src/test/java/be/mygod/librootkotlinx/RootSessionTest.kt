@@ -30,6 +30,7 @@ import org.junit.Test
 import java.lang.reflect.Method
 import java.lang.reflect.Proxy
 import sun.misc.Unsafe
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -216,10 +217,10 @@ class RootSessionTest {
         val server = session.acquire()
 
         session.release(server)
-        advanceTimeBy(999)
+        advanceTimeBy(999.milliseconds)
         runCurrent()
         assertTrue(server.active)
-        advanceTimeBy(1)
+        advanceTimeBy(1.milliseconds)
         runCurrent()
 
         assertFalse(server.active)
