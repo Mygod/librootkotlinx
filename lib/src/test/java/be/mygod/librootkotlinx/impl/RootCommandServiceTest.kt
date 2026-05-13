@@ -1,0 +1,79 @@
+package be.mygod.librootkotlinx.impl
+
+import android.os.IBinder
+import android.os.Parcel
+import android.os.Parcelable
+import android.os.RemoteException
+import be.mygod.librootkotlinx.RootCommand
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.setMain
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Test
+
+@OptIn(ExperimentalCoroutinesApi::class)
+class RootCommandServiceTest {
+    private val mainDispatcher = UnconfinedTestDispatcher()
+
+    @Before
+    fun setUp() {
+        Dispatchers.setMain(mainDispatcher)
+    }
+
+    @After
+    fun tearDown() {
+        Dispatchers.resetMain()
+    }
+
+    @Test
+    fun commandFailureResponseFallsBackWhenRichFailureCannotBeDelivered() = runTest {
+        val service = RootCommandService()
+        val callback = FailingFirstResponseCallback()
+
+        service.binder().execute(7, RootCommandRequest(FailingCommand), callback)
+        val response = callback.fallbackResponse.await()
+
+        assertEquals(2, callback.responseCalls)
+        assertEquals(7, callback.responseId)
+        assertEquals(RootCommandResponse.EX_THROWABLE, response.status)
+        val cause = response.readException(null).cause
+        assertTrue(cause is IllegalStateException)
+        assertTrue(cause?.message.orEmpty().contains(FailingCommand.failure.javaClass.name))
+    }
+
+    private class FailingFirstResponseCallback : IRootCommandCallback.Default() {
+        val fallbackResponse = CompletableDeferred<RootCommandResponse>()
+        var responseCalls = 0
+        var responseId = -1L
+
+        override fun onResponse(id: Long, response: RootCommandResponse) {
+            ++responseCalls
+            responseId = id
+            if (responseCalls == 1) throw RemoteException("rich failure too large")
+            fallbackResponse.complete(response)
+        }
+
+        override fun asBinder(): IBinder? = null
+    }
+
+    private object FailingCommand : RootCommand<Parcelable?> {
+        val failure = IllegalArgumentException("boom")
+
+        override suspend fun execute(): Parcelable? = throw failure
+        override fun describeContents() = 0
+        override fun writeToParcel(dest: Parcel, flags: Int) = Unit
+    }
+
+    private fun RootCommandService.binder(): IRootCommandService =
+        RootCommandService::class.java.getDeclaredField("binder").let {
+            it.isAccessible = true
+            it.get(this) as IRootCommandService
+        }
+}

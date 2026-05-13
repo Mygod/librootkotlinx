@@ -98,7 +98,20 @@ internal class RootCommandService : RootService() {
             })
         } catch (e: RemoteException) {
             Logger.me.w("Failed to deliver root command failure #$id", e)
-            commandJobs.cancelAll()
+            try {
+                sendResponse(id, RootCommandResponse(
+                    RootCommandResponse.EX_THROWABLE,
+                    ParcelableThrowable.Other(
+                        "java.lang.IllegalStateException: Root command failed with ${throwable.javaClass.name}, " +
+                            "but its failure payload could not be delivered",
+                    ),
+                ))
+            } catch (fallbackFailure: RemoteException) {
+                Logger.me.w("Failed to deliver fallback root command failure #$id; stopping root service", fallbackFailure)
+                commandJobs.cancelAll()
+                serviceJob.cancel()
+                stopSelf()
+            }
         }
     }
 
