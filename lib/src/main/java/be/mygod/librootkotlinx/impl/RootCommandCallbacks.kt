@@ -7,15 +7,13 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.channels.SendChannel
 
-internal sealed interface RootCommandCallbackAction {
-    data object Keep : RootCommandCallbackAction
-    data object Remove : RootCommandCallbackAction
-    data object CancelRemote : RootCommandCallbackAction
+internal enum class RootCommandCallbackAction {
+    Keep,
+    Remove,
+    CancelRemote,
 }
 
-internal sealed class RootCommandCallback(
-    protected val classLoader: ClassLoader?,
-) {
+internal sealed class RootCommandCallback(protected val classLoader: ClassLoader?) {
     abstract fun close(cause: Throwable)
     abstract operator fun invoke(response: RootCommandResponse): RootCommandCallbackAction
 
@@ -28,13 +26,9 @@ internal sealed class RootCommandCallback(
             else result.completeExceptionally(cause)
         }
 
-        override fun invoke(response: RootCommandResponse): RootCommandCallbackAction {
-            if (response.status == RootCommandResponse.SUCCESS) {
-                result.complete(response.payload)
-            } else {
-                result.completeExceptionally(response.readException(classLoader))
-            }
-            return RootCommandCallbackAction.Remove
+        override fun invoke(response: RootCommandResponse) = RootCommandCallbackAction.Remove.also {
+            if (response.status == RootCommandResponse.SUCCESS) result.complete(response.payload)
+            else result.completeExceptionally(response.readException(classLoader))
         }
     }
 
@@ -46,37 +40,26 @@ internal sealed class RootCommandCallback(
             channel.close(cause)
         }
 
-        override fun invoke(response: RootCommandResponse): RootCommandCallbackAction {
-            when (response.status) {
-                RootCommandResponse.SUCCESS -> {
-                    val result = channel.trySend(response.payload)
-                    if (result.isClosed) {
-                        return RootCommandCallbackAction.CancelRemote
-                    } else if (result.isFailure) {
+        override fun invoke(response: RootCommandResponse) = when (response.status) {
+            RootCommandResponse.SUCCESS -> {
+                val result = channel.trySend(response.payload)
+                when {
+                    result.isClosed -> RootCommandCallbackAction.CancelRemote
+                    result.isFailure -> RootCommandCallbackAction.CancelRemote.also {
                         val cause = result.exceptionOrNull()
-                                ?: IllegalStateException("Flow buffer rejected root command response")
+                            ?: IllegalStateException("Flow buffer rejected root command response")
                         channel.close(cause)
-                        return RootCommandCallbackAction.CancelRemote
                     }
-                }
-                RootCommandResponse.COMPLETE -> {
-                    channel.close()
-                    return RootCommandCallbackAction.Remove
-                }
-                else -> {
-                    channel.close(response.readException(classLoader))
-                    return RootCommandCallbackAction.Remove
+                    else -> RootCommandCallbackAction.Keep
                 }
             }
-            return RootCommandCallbackAction.Keep
+            RootCommandResponse.COMPLETE -> RootCommandCallbackAction.Remove.also { channel.close() }
+            else -> RootCommandCallbackAction.Remove.also { channel.close(response.readException(classLoader)) }
         }
     }
 }
 
-internal data class RegisteredRootCommandCallback(
-    val id: Long,
-    val callback: RootCommandCallback,
-)
+internal data class RegisteredRootCommandCallback(val id: Long, val callback: RootCommandCallback)
 
 internal enum class RootCommandResponseHandling {
     Done,

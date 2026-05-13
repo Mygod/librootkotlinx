@@ -7,19 +7,11 @@ internal class RootCommandJobs {
     private val jobs = MutableLongObjectMap<Job>()
 
     fun track(id: Long, job: Job) {
-        synchronized(this) {
-            jobs[id] = job
-        }
-        job.invokeOnCompletion {
-            synchronized(this) {
-                jobs.remove(id, job)
-            }
-        }
+        synchronized(this) { jobs[id] = job }
+        job.invokeOnCompletion { synchronized(this) { jobs.remove(id, job) } }
     }
 
-    fun cancel(id: Long) {
-        synchronized(this) { jobs[id] }?.cancel()
-    }
+    fun cancel(id: Long) = synchronized(this) { jobs[id] }?.cancel()
 
     fun cancelAll() {
         val snapshot = ArrayList<Job>()
