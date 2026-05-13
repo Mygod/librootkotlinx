@@ -206,12 +206,10 @@ abstract class RootSession {
         }
     }
 
-    suspend fun closeExisting() {
-        mutex.withLock {
-            if (usersCount > 0 || startup != null) closePending = true else {
-                haltTimeoutLocked()
-                closeLocked()
-            }
+    suspend fun closeExisting() = mutex.withLock {
+        if (usersCount > 0 || startup != null) closePending = true else {
+            haltTimeoutLocked()
+            closeLocked()
         }
     }
 }

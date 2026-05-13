@@ -531,8 +531,8 @@ class RootServer internal constructor() {
         }
     }
 
-    companion object {
-        private fun Throwable.asCancellationException() = when (this) {
+    private companion object {
+        fun Throwable.asCancellationException() = when (this) {
             is CancellationException -> this
             else -> CancellationException(message).also { it.initCause(this) }
         }

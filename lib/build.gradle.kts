@@ -32,7 +32,10 @@ android {
 
 metalava {
     filename.set("api/current.txt")
-    arguments.addAll("--stub-packages", "be.mygod.librootkotlinx:be.mygod.librootkotlinx.io")
+    arguments.addAll(
+        "--stub-packages",
+        "be.mygod.librootkotlinx:be.mygod.librootkotlinx.io:be.mygod.librootkotlinx.net",
+    )
 }
 
 dependencies {

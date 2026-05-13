@@ -185,7 +185,7 @@ package be.mygod.librootkotlinx {
     property public short[] value;
   }
 
-  @RequiresApi(21) @kotlinx.parcelize.Parcelize public final class ParcelableSize implements android.os.Parcelable {
+  @kotlinx.parcelize.Parcelize public final class ParcelableSize implements android.os.Parcelable {
     ctor public ParcelableSize(android.util.Size value);
     method public android.util.Size component1();
     method public be.mygod.librootkotlinx.ParcelableSize copy(optional android.util.Size value);
@@ -193,7 +193,7 @@ package be.mygod.librootkotlinx {
     property public android.util.Size value;
   }
 
-  @RequiresApi(21) @kotlinx.parcelize.Parcelize public final class ParcelableSizeF implements android.os.Parcelable {
+  @kotlinx.parcelize.Parcelize public final class ParcelableSizeF implements android.os.Parcelable {
     ctor public ParcelableSizeF(android.util.SizeF value);
     method public android.util.SizeF component1();
     method public be.mygod.librootkotlinx.ParcelableSizeF copy(optional android.util.SizeF value);
@@ -259,10 +259,6 @@ package be.mygod.librootkotlinx {
 
   public abstract sealed nonexhaustive class ParcelableThrowable implements android.os.Parcelable {
     method public abstract android.os.RemoteException unwrap(optional ClassLoader? classLoader);
-    field public static final be.mygod.librootkotlinx.ParcelableThrowable.Companion Companion;
-  }
-
-  public static final class ParcelableThrowable.Companion {
   }
 
   public final class ParcelableThrowableKt {
@@ -290,10 +286,6 @@ package be.mygod.librootkotlinx {
     method @KotlinOnly public inline <T extends android.os.Parcelable, reified C extends be.mygod.librootkotlinx.RootFlow<T>> kotlinx.coroutines.flow.Flow<T> flow(C source, optional int capacity, optional kotlinx.coroutines.channels.BufferOverflow onBufferOverflow);
     method @InaccessibleFromKotlin public boolean getActive();
     property public boolean active;
-    field public static final be.mygod.librootkotlinx.RootServer.Companion Companion;
-  }
-
-  public static final class RootServer.Companion {
   }
 
   public static final class RootServer.UnexpectedExitException extends android.os.RemoteException {
@@ -317,7 +309,6 @@ package be.mygod.librootkotlinx {
 
   public final class Utils {
     method @InaccessibleFromKotlin public static android.content.Context getSystemContext();
-    method public static inline <T> T useParcel(kotlin.jvm.functions.Function1<? super android.os.Parcel,? extends T> block);
     property public static android.content.Context systemContext;
     field public static android.content.Context systemContext;
   }
@@ -340,3 +331,25 @@ package be.mygod.librootkotlinx.io {
   }
 
 }
+
+package be.mygod.librootkotlinx.net {
+
+  public final class ALocalServerSocket implements java.io.Closeable {
+    ctor public ALocalServerSocket(android.net.LocalServerSocket socket, android.os.Handler handler);
+    method public suspend Object? accept(kotlin.coroutines.Continuation<? super be.mygod.librootkotlinx.net.ALocalSocket>);
+    method public void close();
+    method @InaccessibleFromKotlin public android.net.LocalServerSocket getSocket();
+    property public android.net.LocalServerSocket socket;
+  }
+
+  public final class ALocalSocket implements java.io.Closeable {
+    ctor public ALocalSocket(android.net.LocalSocket socket, android.os.Handler handler);
+    method public void close();
+    method @InaccessibleFromKotlin public android.net.LocalSocket getSocket();
+    method public io.ktor.utils.io.ByteReadChannel openReadChannel(optional byte[] buffer);
+    method public io.ktor.utils.io.ByteWriteChannel openWriteChannel(optional byte[] buffer);
+    property public android.net.LocalSocket socket;
+  }
+
+}
+
