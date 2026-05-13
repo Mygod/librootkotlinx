@@ -185,7 +185,7 @@ package be.mygod.librootkotlinx {
     property public short[] value;
   }
 
-  @RequiresApi(21) @kotlinx.parcelize.Parcelize public final class ParcelableSize implements android.os.Parcelable {
+  @kotlinx.parcelize.Parcelize public final class ParcelableSize implements android.os.Parcelable {
     ctor public ParcelableSize(android.util.Size value);
     method public android.util.Size component1();
     method public be.mygod.librootkotlinx.ParcelableSize copy(optional android.util.Size value);
@@ -193,7 +193,7 @@ package be.mygod.librootkotlinx {
     property public android.util.Size value;
   }
 
-  @RequiresApi(21) @kotlinx.parcelize.Parcelize public final class ParcelableSizeF implements android.os.Parcelable {
+  @kotlinx.parcelize.Parcelize public final class ParcelableSizeF implements android.os.Parcelable {
     ctor public ParcelableSizeF(android.util.SizeF value);
     method public android.util.SizeF component1();
     method public be.mygod.librootkotlinx.ParcelableSizeF copy(optional android.util.SizeF value);
@@ -259,10 +259,6 @@ package be.mygod.librootkotlinx {
 
   public abstract sealed nonexhaustive class ParcelableThrowable implements android.os.Parcelable {
     method public abstract android.os.RemoteException unwrap(optional ClassLoader? classLoader);
-    field public static final be.mygod.librootkotlinx.ParcelableThrowable.Companion Companion;
-  }
-
-  public static final class ParcelableThrowable.Companion {
   }
 
   public final class ParcelableThrowableKt {
@@ -284,17 +280,12 @@ package be.mygod.librootkotlinx {
   public final class RootServer {
     method public suspend Object? close(kotlin.coroutines.Continuation<? super kotlin.Unit>);
     method @kotlin.jvm.Throws(exceptionClasses=RemoteException::class) public suspend <T extends android.os.Parcelable> Object? execute(be.mygod.librootkotlinx.RootCommand<T> command, ClassLoader? classLoader, kotlin.coroutines.Continuation<? super T>) throws android.os.RemoteException;
-    method @kotlinx.coroutines.DelicateCoroutinesApi public void execute(be.mygod.librootkotlinx.RootCommandOneWay command);
+    method @kotlin.jvm.Throws(exceptionClasses=RemoteException::class) @kotlinx.coroutines.DelicateCoroutinesApi public void execute(be.mygod.librootkotlinx.RootCommandOneWay command) throws android.os.RemoteException;
     method @KotlinOnly @kotlin.jvm.Throws(exceptionClasses={android.os.RemoteException.class}) public suspend inline <T extends android.os.Parcelable, reified C extends be.mygod.librootkotlinx.RootCommand<T>> Object? execute(C command, kotlin.coroutines.Continuation<? super T>) throws android.os.RemoteException;
-    method public <T extends android.os.Parcelable> kotlinx.coroutines.flow.Flow<T> flow(be.mygod.librootkotlinx.RootFlow<T> source, ClassLoader? classLoader);
-    method @KotlinOnly public inline <T extends android.os.Parcelable, reified C extends be.mygod.librootkotlinx.RootFlow<T>> kotlinx.coroutines.flow.Flow<T> flow(C source);
+    method public <T extends android.os.Parcelable> kotlinx.coroutines.flow.Flow<T> flow(be.mygod.librootkotlinx.RootFlow<T> source, ClassLoader? classLoader, optional int capacity, optional kotlinx.coroutines.channels.BufferOverflow onBufferOverflow);
+    method @KotlinOnly public inline <T extends android.os.Parcelable, reified C extends be.mygod.librootkotlinx.RootFlow<T>> kotlinx.coroutines.flow.Flow<T> flow(C source, optional int capacity, optional kotlinx.coroutines.channels.BufferOverflow onBufferOverflow);
     method @InaccessibleFromKotlin public boolean getActive();
-    method public suspend Object? init(android.content.Context context, kotlin.coroutines.Continuation<? super kotlin.Unit>);
     property public boolean active;
-    field public static final be.mygod.librootkotlinx.RootServer.Companion Companion;
-  }
-
-  public static final class RootServer.Companion {
   }
 
   public static final class RootServer.UnexpectedExitException extends android.os.RemoteException {
@@ -305,22 +296,60 @@ package be.mygod.librootkotlinx {
     ctor public RootSession();
     method public final suspend Object? acquire(kotlin.coroutines.Continuation<? super be.mygod.librootkotlinx.RootServer>);
     method public final suspend Object? closeExisting(kotlin.coroutines.Continuation<? super kotlin.Unit>);
-    method @InaccessibleFromKotlin protected kotlin.coroutines.CoroutineContext getTimeoutContext();
-    method protected abstract suspend Object? initServer(be.mygod.librootkotlinx.RootServer server, kotlin.coroutines.Continuation<? super kotlin.Unit>);
+    method @InaccessibleFromKotlin protected abstract android.content.Context getContext();
+    method @InaccessibleFromKotlin protected kotlinx.coroutines.CoroutineDispatcher getTimeoutDispatcher();
+    method protected suspend Object? handleRootIo(android.os.ParcelFileDescriptor stdin, android.os.ParcelFileDescriptor stdout, android.os.ParcelFileDescriptor stderr, kotlin.coroutines.Continuation<? super kotlin.Unit>);
+    method @CallSuper protected suspend Object? initServer(be.mygod.librootkotlinx.RootServer server, kotlin.coroutines.Continuation<? super kotlin.Unit>);
     method public final suspend Object? release(be.mygod.librootkotlinx.RootServer server, kotlin.coroutines.Continuation<? super kotlin.Unit>);
     method public final suspend inline <T> Object? use(kotlin.jvm.functions.Function1<? super be.mygod.librootkotlinx.RootServer,? extends T> block, kotlin.coroutines.Continuation<? super T>);
+    property protected abstract android.content.Context context;
     property protected kotlin.time.Duration timeout;
-    property protected kotlin.coroutines.CoroutineContext timeoutContext;
+    property protected kotlinx.coroutines.CoroutineDispatcher timeoutDispatcher;
   }
 
   public final class Utils {
     method @InaccessibleFromKotlin public static android.content.Context getSystemContext();
-    method public static inline <T> T useParcel(kotlin.jvm.functions.Function1<? super android.os.Parcel,? extends T> block);
     property public static android.content.Context systemContext;
     field public static android.content.Context systemContext;
   }
 
   public typealias RootCommandNoResult = be.mygod.librootkotlinx.RootCommand<android.os.Parcelable?>;
+
+}
+
+package be.mygod.librootkotlinx.io {
+
+  public final class FileDescriptorChannels {
+    method @InaccessibleFromKotlin public static boolean isNonblocking(java.io.FileDescriptor);
+    method public static io.ktor.utils.io.ByteReadChannel openReadChannel(android.os.ParcelFileDescriptor, android.os.Handler handler, optional byte[] buffer);
+    method public static io.ktor.utils.io.ByteReadChannel openReadChannel(java.io.FileDescriptor, android.os.Handler handler, optional byte[] buffer);
+    method public static io.ktor.utils.io.ByteWriteChannel openWriteChannel(android.os.ParcelFileDescriptor, android.os.Handler handler, optional byte[] buffer);
+    method public static io.ktor.utils.io.ByteWriteChannel openWriteChannel(java.io.FileDescriptor, android.os.Handler handler, optional byte[] buffer);
+    method @InaccessibleFromKotlin public static void setNonblocking(java.io.FileDescriptor, boolean);
+    method public static suspend Object? useLines(io.ktor.utils.io.ByteReadChannel, kotlin.jvm.functions.Function1<? super java.lang.String,kotlin.Unit> block, kotlin.coroutines.Continuation<? super kotlin.Unit>);
+    property public static boolean java.io.FileDescriptor.isNonblocking;
+  }
+
+}
+
+package be.mygod.librootkotlinx.net {
+
+  public final class ALocalServerSocket implements java.io.Closeable {
+    ctor public ALocalServerSocket(android.net.LocalServerSocket socket, android.os.Handler handler);
+    method public suspend Object? accept(kotlin.coroutines.Continuation<? super be.mygod.librootkotlinx.net.ALocalSocket>);
+    method public void close();
+    method @InaccessibleFromKotlin public android.net.LocalServerSocket getSocket();
+    property public android.net.LocalServerSocket socket;
+  }
+
+  public final class ALocalSocket implements java.io.Closeable {
+    ctor public ALocalSocket(android.net.LocalSocket socket, android.os.Handler handler);
+    method public void close();
+    method @InaccessibleFromKotlin public android.net.LocalSocket getSocket();
+    method public io.ktor.utils.io.ByteReadChannel openReadChannel(optional byte[] buffer);
+    method public io.ktor.utils.io.ByteWriteChannel openWriteChannel(optional byte[] buffer);
+    property public android.net.LocalSocket socket;
+  }
 
 }
 

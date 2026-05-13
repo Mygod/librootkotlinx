@@ -34,8 +34,8 @@ sealed class ParcelableThrowable : Parcelable {
 
     abstract fun unwrap(classLoader: ClassLoader? = ParcelableThrowable::class.java.classLoader): RemoteException
 
-    companion object {
-        internal fun parseSerializable(b: ByteArray, classLoader: ClassLoader?) =
+    internal companion object {
+        fun parseSerializable(b: ByteArray, classLoader: ClassLoader?) =
             object : ObjectInputStream(b.inputStream()) {
                 override fun resolveClass(desc: ObjectStreamClass) = try {
                     Class.forName(desc.name, false, classLoader)
@@ -56,7 +56,7 @@ sealed class ParcelableThrowable : Parcelable {
             }
             return RuntimeException(message)
         }
-        internal fun parseThrowable(s: String, classLoader: ClassLoader?): Throwable {
+        fun parseThrowable(s: String, classLoader: ClassLoader?): Throwable {
             val name = s.lineSequence().firstOrNull().orEmpty().substringBefore(':')
             val targetClass = try {
                 classLoader?.loadClass(name)

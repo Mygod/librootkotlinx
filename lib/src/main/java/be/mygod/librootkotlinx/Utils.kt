@@ -21,6 +21,7 @@ import kotlinx.parcelize.Parcelize
  *
  * This is initialized after [RootServer.init] has bound the root service.
  */
+@SuppressLint("StaticFieldLeak")
 lateinit var systemContext: Context
     internal set
 
@@ -253,11 +254,9 @@ data class ParcelableCharSequenceArray(val value: Array<CharSequence>) : Parcela
 }
 
 @Parcelize
-@RequiresApi(21)
 data class ParcelableSize(val value: Size) : Parcelable
 
 @Parcelize
-@RequiresApi(21)
 data class ParcelableSizeF(val value: SizeF) : Parcelable
 
 @Parcelize
@@ -280,12 +279,3 @@ data class ParcelableArray(val value: Array<Parcelable?>) : Parcelable {
 
 @Parcelize
 data class ParcelableList(val value: List<Parcelable?>) : Parcelable
-
-@SuppressLint("Recycle")
-inline fun <T> useParcel(block: (Parcel) -> T) = Parcel.obtain().run {
-    try {
-        block(this)
-    } finally {
-        recycle()
-    }
-}

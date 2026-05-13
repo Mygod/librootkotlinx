@@ -12,25 +12,21 @@ import be.mygod.librootkotlinx.RootFlow
 import be.mygod.librootkotlinx.systemContext
 import com.topjohnwu.superuser.ipc.RootService
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 internal class RootCommandService : RootService() {
-    private data class CommandKey(val callback: IBinder, val id: Long)
-
     private val serviceJob = SupervisorJob()
     private val commandScope = CoroutineScope(Dispatchers.Main.immediate + serviceJob)
     private val callbackDispatcher = Dispatchers.Default.limitedParallelism(1)
-    private val cancellables = HashMap<CommandKey, Job>()
+    private val commandJobs = RootCommandJobs()
 
     override fun onBind(intent: Intent): IBinder {
         systemContext = this
@@ -67,44 +63,30 @@ internal class RootCommandService : RootService() {
                 try {
                     (command as RootCommandOneWay).execute()
                 } catch (e: Throwable) {
+                    if (e is CancellationException && !currentCoroutineContext().isActive) return@launch
                     Logger.me.e("Unexpected exception in RootCommandOneWay (${command.javaClass.simpleName})", e)
                 }
             }
         }
 
-        override fun cancel(id: Long, callback: IRootCommandCallback) {
-            synchronized(this@RootCommandService) { cancellables[CommandKey(callback.asBinder(), id)] }?.cancel()
+        override fun cancel(id: Long) {
+            commandJobs.cancel(id)
         }
 
-        override fun close(callback: IRootCommandCallback) = cancel(callback.asBinder())
+        override fun close() = commandJobs.cancelAll()
     }
 
     private fun launchCancellable(id: Long, callback: IRootCommandCallback, block: suspend CoroutineScope.() -> Unit) {
-        val commandKey = CommandKey(callback.asBinder(), id)
-        val commandJob = Job(serviceJob)
-        synchronized(this) { cancellables[commandKey] = commandJob }
-        commandJob.invokeOnCompletion {
-            synchronized(this@RootCommandService) {
-                if (cancellables[commandKey] === commandJob) cancellables.remove(commandKey)
-            }
-        }
-        commandScope.launch(commandJob) {
+        val commandJob = commandScope.launch(start = CoroutineStart.LAZY) {
             try {
                 block()
             } catch (e: Throwable) {
                 if (e is CancellationException && !currentCoroutineContext().isActive) return@launch
                 callback.trySendThrowable(id, e)
-            } finally {
-                commandJob.complete()
             }
         }
-    }
-
-    private fun cancel(callback: IBinder) {
-        val jobs = synchronized(this) {
-            cancellables.entries.asSequence().filter { it.key.callback == callback }.map { it.value }.toList()
-        }
-        for (job in jobs) job.cancel()
+        commandJobs.track(id, commandJob)
+        commandJob.start()
     }
 
     private suspend fun IRootCommandCallback.trySendThrowable(id: Long, throwable: Throwable) {
@@ -115,14 +97,12 @@ internal class RootCommandService : RootService() {
                 RootCommandResponse(RootCommandResponse.EX_THROWABLE, ParcelableThrowable(throwable))
             })
         } catch (e: RemoteException) {
-            Logger.me.d("Failed to deliver root command failure #$id", e)
-            cancel(asBinder())
+            Logger.me.w("Failed to deliver root command failure #$id", e)
+            commandJobs.cancelAll()
         }
     }
 
     private suspend fun IRootCommandCallback.sendResponse(id: Long, response: RootCommandResponse) {
-        withContext(callbackDispatcher + NonCancellable) {
-            onResponse(id, response)
-        }
+        withContext(callbackDispatcher) { onResponse(id, response) }
     }
 }

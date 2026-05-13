@@ -1,55 +1,146 @@
 package be.mygod.librootkotlinx
 
+import android.content.Context
+import android.os.Handler
+import android.os.Looper
+import android.os.ParcelFileDescriptor
+import androidx.annotation.CallSuper
+import be.mygod.librootkotlinx.io.useLines
+import be.mygod.librootkotlinx.io.openReadChannel
 import kotlinx.coroutines.CoroutineStart
-import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlin.coroutines.CoroutineContext
 import kotlin.time.Duration.Companion.minutes
 
 /**
  * This object manages creation of [RootServer] and times them out automagically, with default timeout of 5 minutes.
+ *
+ * Use one process-wide [RootSession] for the root command service. Concurrent clients should share it through [acquire],
+ * [use], and [release] instead of creating multiple sessions.
  */
 abstract class RootSession {
-    protected abstract suspend fun initServer(server: RootServer)
+    protected abstract val context: Context
+
+    /**
+     * Handles observed stdin/stdout/stderr of the root app_process.
+     *
+     * Keep this suspended while the descriptors should stay open. Returning or failing before startup completes makes
+     * startup fail; after startup, returning only ends IO handling.
+     */
+    protected open suspend fun handleRootIo(
+        stdin: ParcelFileDescriptor,
+        stdout: ParcelFileDescriptor,
+        stderr: ParcelFileDescriptor,
+    ) {
+        stdin.close()
+        val handler = Handler(Looper.getMainLooper())
+        coroutineScope {
+            launch { stdout.openReadChannel(handler).useLines(Logger.me::i) }
+            launch { stderr.openReadChannel(handler).useLines(Logger.me::e) }
+        }
+    }
+
+    @CallSuper
+    protected open suspend fun initServer(server: RootServer) = server.init(context, ::handleRootIo)
+
     /**
      * Timeout to close [RootServer].
      */
     protected open val timeout get() = 5.minutes
-    protected open val timeoutContext: CoroutineContext get() = Dispatchers.Default
+    protected open val timeoutDispatcher: CoroutineDispatcher get() = Dispatchers.Default
 
     private val mutex = Mutex()
+    private val timeoutScope by lazy { CoroutineScope(SupervisorJob() + timeoutDispatcher) }
     private var server: RootServer? = null
+    private var startupBarrier: CompletableDeferred<Unit>? = null
     private var timeoutJob: Job? = null
-    private var usersCount = 0L
-    private var closePending = false
+    private var leaseCount = 0L
+    private var closeOnRelease = false
 
-    suspend fun acquire() = mutex.withLock {
-        haltTimeoutLocked()
-        closePending = false
-        server?.let {
-            if (it.active) {
-                ++usersCount
-                return@withLock it
+    suspend fun acquire(): RootServer {
+        while (true) {
+            var activeServer: RootServer? = null
+            var startupBarrierToAwait: CompletableDeferred<Unit>? = null
+            var shouldStart = false
+            mutex.withLock {
+                server?.let {
+                    haltTimeoutLocked()
+                    if (it.active) {
+                        ++leaseCount
+                        activeServer = it
+                        return@withLock
+                    }
+                    leaseCount = 0
+                    withContext(NonCancellable) { closeLocked() }
+                }
+                check(leaseCount == 0L) { "Unexpected $server, $leaseCount" }
+                startupBarrier?.let { startupBarrierToAwait = it } ?: run {
+                    haltTimeoutLocked()
+                    closeOnRelease = false
+                    startupBarrier = CompletableDeferred()
+                    shouldStart = true
+                }
             }
-            usersCount = 0
-            withContext(NonCancellable) { closeLocked() }
+            activeServer?.let { return it }
+            startupBarrierToAwait?.await()
+            if (shouldStart) return startServer()
         }
-        check(usersCount == 0L) { "Unexpected $server, $usersCount" }
+    }
+
+    private suspend fun startServer(): RootServer {
+        var created: RootServer? = null
+        try {
+            val server = createServer()
+            created = server
+            val startupBarrier = mutex.withLock {
+                check(this.server == null && leaseCount == 0L) { "Unexpected ${this.server}, $leaseCount" }
+                this.server = server
+                ++leaseCount
+                created = null
+                startupBarrier.also { startupBarrier = null }
+            }
+            startupBarrier?.complete(Unit)
+            return server
+        } catch (e: Throwable) {
+            val startupBarrier = withContext(NonCancellable) {
+                created?.let {
+                    try {
+                        it.close()
+                    } catch (eClose: Throwable) {
+                        e.addSuppressed(eClose)
+                    }
+                }
+                mutex.withLock { startupBarrier.also { startupBarrier = null } }
+            }
+            if (e is CancellationException) {
+                startupBarrier?.complete(Unit)
+            } else {
+                startupBarrier?.completeExceptionally(e)
+            }
+            throw e
+        }
+    }
+
+    private suspend fun createServer(): RootServer {
         val server = RootServer()
         try {
             initServer(server)
-            this.server = server
-            ++usersCount
-            server
+            currentCoroutineContext().ensureActive()
+            return server
         } catch (e: Throwable) {
             try {
                 withContext(NonCancellable) { server.close() }
@@ -59,22 +150,29 @@ abstract class RootSession {
             throw e
         }
     }
+
     private suspend fun closeLocked() {
-        closePending = false
+        closeOnRelease = false
         val server = server
         this.server = null
         server?.close()
     }
-    @OptIn(DelicateCoroutinesApi::class)
     private fun startTimeoutLocked() {
         check(timeoutJob == null)
-        timeoutJob = GlobalScope.launch(timeoutContext, CoroutineStart.UNDISPATCHED) {
+        timeoutJob = timeoutScope.launch(start = CoroutineStart.UNDISPATCHED) {
             delay(timeout)
             mutex.withLock {
+                // Mutex.lock does not check cancellation when it takes the uncontended fast path.
                 ensureActive()
-                check(usersCount == 0L)
+                check(leaseCount == 0L)
                 timeoutJob = null
-                closeLocked()
+                try {
+                    closeLocked()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Throwable) {
+                    Logger.me.w("Root server timeout close failed", e)
+                }
             }
         }
     }
@@ -85,15 +183,15 @@ abstract class RootSession {
     suspend fun release(server: RootServer) = withContext(NonCancellable) {
         mutex.withLock {
             if (this@RootSession.server != server) return@withLock  // outdated reference
-            require(usersCount > 0)
+            require(leaseCount > 0)
             when {
                 !server.active -> {
-                    usersCount = 0
+                    leaseCount = 0
                     closeLocked()
                     return@withLock
                 }
-                --usersCount > 0L -> return@withLock
-                closePending -> closeLocked()
+                --leaseCount > 0L -> return@withLock
+                closeOnRelease -> closeLocked()
                 else -> startTimeoutLocked()
             }
         }
@@ -108,7 +206,7 @@ abstract class RootSession {
     }
 
     suspend fun closeExisting() = mutex.withLock {
-        if (usersCount > 0) closePending = true else {
+        if (leaseCount > 0 || startupBarrier != null) closeOnRelease = true else {
             haltTimeoutLocked()
             closeLocked()
         }
