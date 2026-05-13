@@ -55,9 +55,7 @@ abstract class RootSession {
     }
 
     @CallSuper
-    protected open suspend fun initServer(server: RootServer) {
-        server.init(context, ::handleRootIo)
-    }
+    protected open suspend fun initServer(server: RootServer) = server.init(context, ::handleRootIo)
 
     /**
      * Timeout to close [RootServer].
@@ -113,7 +111,7 @@ abstract class RootSession {
                 this.server = server
                 ++leaseCount
                 created = null
-                finishStartupLocked()
+                startupBarrier.also { startupBarrier = null }
             }
             startupBarrier?.complete(Unit)
             return server
@@ -126,7 +124,7 @@ abstract class RootSession {
                         e.addSuppressed(eClose)
                     }
                 }
-                mutex.withLock { finishStartupLocked() }
+                mutex.withLock { startupBarrier.also { startupBarrier = null } }
             }
             if (e is CancellationException) {
                 startupBarrier?.complete(Unit)
@@ -136,8 +134,6 @@ abstract class RootSession {
             throw e
         }
     }
-
-    private fun finishStartupLocked() = startupBarrier.also { startupBarrier = null }
 
     private suspend fun createServer(): RootServer {
         val server = RootServer()
