@@ -1,7 +1,5 @@
 package be.mygod.librootkotlinx
 
-import android.content.ComponentName
-import android.content.ServiceConnection
 import android.os.IBinder
 import android.os.Parcel
 import android.os.Parcelable
@@ -12,6 +10,7 @@ import be.mygod.librootkotlinx.impl.RootCommandCallback
 import be.mygod.librootkotlinx.impl.RootCommandCallbacks
 import be.mygod.librootkotlinx.impl.RootCommandRequest
 import be.mygod.librootkotlinx.impl.RootCommandResponse
+import be.mygod.librootkotlinx.impl.RootServiceConnection
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.DelicateCoroutinesApi
@@ -33,6 +32,7 @@ import org.junit.Test
 import java.lang.reflect.InvocationTargetException
 import java.lang.reflect.Method
 import java.lang.reflect.Proxy
+import sun.misc.Unsafe
 import kotlin.coroutines.Continuation
 import kotlin.coroutines.intrinsics.COROUTINE_SUSPENDED
 import kotlin.coroutines.resume
@@ -127,7 +127,7 @@ class RootServerTest {
         val server = RootServer()
         val service = RecordingRootCommandService()
         assertTrue(server.events().trySend(
-            server.connectedEvent(NoOpServiceConnection, proxy(IBinder::class.java), service),
+            server.connectedEvent(service),
         ).isSuccess)
         server.setCloseCause(CancellationException("closing"))
 
@@ -168,16 +168,9 @@ class RootServerTest {
     }
 
     private fun RootServer.markConnected(service: IRootCommandService) {
-        val connectedClass = RootServer::class.java.declaredClasses.single {
-            it.simpleName == "ConnectedRootService"
-        }
-        val connected = connectedClass.declaredConstructors.single().let {
-            it.isAccessible = true
-            it.newInstance(NoOpServiceConnection, proxy(IBinder::class.java), service, null)
-        }
         RootServer::class.java.getDeclaredField("connected").apply {
             isAccessible = true
-            set(this@markConnected, connected)
+            set(this@markConnected, connectedService(service))
         }
     }
 
@@ -213,27 +206,35 @@ class RootServerTest {
             it.get(this) as Channel<Any>
         }
 
-    private fun RootServer.connectedEvent(
-        connection: ServiceConnection,
-        binder: IBinder,
-        service: IRootCommandService,
-    ): Any {
+    private fun connectedService(service: IRootCommandService) =
+        RootServiceConnection.Connected(rootServiceConnection(), proxy(IBinder::class.java), service)
+
+    private fun rootServiceConnection(): RootServiceConnection {
+        val connection = unsafe.allocateInstance(RootServiceConnection::class.java) as RootServiceConnection
+        RootServiceConnection::class.java.getDeclaredField("deathRecipient").apply {
+            isAccessible = true
+            set(connection, proxy(IBinder.DeathRecipient::class.java))
+        }
+        return connection
+    }
+
+    private fun RootServer.connectedEvent(service: IRootCommandService): Any {
         val eventClass = RootServer::class.java.declaredClasses.single { it.simpleName == "Event" }
             .declaredClasses.single { it.simpleName == "Connected" }
         return eventClass.declaredConstructors.single().let {
             it.isAccessible = true
-            it.newInstance(connection, binder, service)
+            it.newInstance(connectedService(service))
         }
     }
 
     private suspend fun RootServer.cleanup() = callSuspend("cleanup")
 
-    private object NoOpServiceConnection : ServiceConnection {
-        override fun onServiceConnected(name: ComponentName, service: IBinder) = Unit
-        override fun onServiceDisconnected(name: ComponentName) = Unit
-    }
-
     private companion object {
+        val unsafe: Unsafe = Unsafe::class.java.getDeclaredField("theUnsafe").let {
+            it.isAccessible = true
+            it.get(null) as Unsafe
+        }
+
         suspend fun Any.callSuspend(name: String) = suspendCoroutine { continuation ->
             val method = javaClass.getDeclaredMethod(name, Continuation::class.java).apply { isAccessible = true }
             val result = try {

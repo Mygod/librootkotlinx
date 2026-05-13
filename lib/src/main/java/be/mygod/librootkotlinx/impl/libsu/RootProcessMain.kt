@@ -1,23 +1,23 @@
-package be.mygod.librootkotlinx.impl
+package be.mygod.librootkotlinx.impl.libsu
 
-import android.net.LocalSocket
-import android.net.LocalSocketAddress
-import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import be.mygod.librootkotlinx.net.ALocalSocket
-import io.ktor.utils.io.discard
-import kotlinx.coroutines.CancellationException
+import be.mygod.librootkotlinx.impl.RootProcessOwnership
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
-import java.io.IOException
 import kotlin.system.exitProcess
 
+/**
+ * Root-side entry point that mirrors libsu's RootServerMain startup.
+ *
+ * libsu's RootServerMain closes stdout/stderr before creating the root-side Service. This entry point intentionally
+ * keeps stdio open for [RootProcessLauncher]'s redirection, connects the app-owned [RootProcessOwnership] socket before
+ * handing off to libsu, and then reflectively invokes RootServerMain with the original arguments. Ownership socket
+ * connection and monitoring live in [RootProcessOwnership] so this file stays limited to libsu entry-point mirroring.
+ */
 internal object RootProcessMain {
     private const val TAG = "RootServer"
-    const val OWNERSHIP_SOCKET_ENV = "LIBROOTKOTLINX_OWNERSHIP_SOCKET"
 
     @JvmStatic
     fun main(args: Array<String>) {
@@ -27,7 +27,7 @@ internal object RootProcessMain {
             exitProcess(1)
         }
         val ownership = try {
-            connectOwnership()
+            RootProcessOwnership.connectFromRootProcess()
         } catch (e: Throwable) {
             Log.e(TAG, "Failed to connect root process ownership socket", e)
             e.printStackTrace()
@@ -42,7 +42,10 @@ internal object RootProcessMain {
             Looper.prepareMainLooper()
             val processJob = SupervisorJob()
             try {
-                monitorOwnership(ownership, CoroutineScope(processJob + Dispatchers.Main.immediate))
+                RootProcessOwnership.monitorRootProcess(
+                    ownership,
+                    CoroutineScope(processJob + Dispatchers.Main.immediate),
+                )
                 val rootServerMain = Class.forName("com.topjohnwu.superuser.internal.RootServerMain")
                 val constructor = rootServerMain.getDeclaredConstructor(Array<String>::class.java)
                 constructor.isAccessible = true
@@ -58,43 +61,5 @@ internal object RootProcessMain {
             exitProcess(1)
         }
         exitProcess(1)
-    }
-
-    private fun connectOwnership(): LocalSocket {
-        val socketName = System.getenv(OWNERSHIP_SOCKET_ENV)
-            ?: throw IllegalStateException("$OWNERSHIP_SOCKET_ENV is not set")
-        val socket = LocalSocket()
-        try {
-            socket.connect(LocalSocketAddress(socketName))
-            return socket
-        } catch (e: Throwable) {
-            try {
-                socket.close()
-            } catch (closeError: IOException) {
-                e.addSuppressed(closeError)
-            }
-            throw e
-        }
-    }
-
-    private fun monitorOwnership(socket: LocalSocket, scope: CoroutineScope) {
-        val handler = Handler(Looper.getMainLooper())
-        scope.launch {
-            val channel = ALocalSocket(socket, handler).openReadChannel()
-            var ownershipLost = false
-            try {
-                channel.discard()
-                Log.w(TAG, "Root process ownership revoked")
-                ownershipLost = true
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Throwable) {
-                Log.w(TAG, "Root process ownership monitor failed", e)
-                ownershipLost = true
-            } finally {
-                channel.cancel(null)
-                if (ownershipLost) exitProcess(0)
-            }
-        }
     }
 }

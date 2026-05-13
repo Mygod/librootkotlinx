@@ -1,4 +1,4 @@
-package be.mygod.librootkotlinx.impl
+package be.mygod.librootkotlinx.impl.libsu
 
 import android.annotation.SuppressLint
 import android.content.Intent
@@ -7,8 +7,12 @@ import com.topjohnwu.superuser.internal.RootServiceManager
 import com.topjohnwu.superuser.ipc.RootService
 
 /**
- * Cleans up libsu's private pending bind state when [RootService.bindOrTask] has already queued a startup
- * task, but root shell startup fails before libsu receives the root service manager broadcast.
+ * Reflection shim for libsu's private pending RootService bind state.
+ *
+ * This mirrors RootServiceManager's en-route flags and pendingTasks list around createBindTask. librootkotlinx changes
+ * the ownership boundary by calling [RootService.bindOrTask] and running the returned Shell.Task itself; if that shell
+ * startup fails before libsu receives the root service manager broadcast, [cancel] removes only the queued task owned by
+ * this bind and clears the matching en-route flag. Keep this file limited to that libsu reflection workaround.
  */
 @SuppressLint("RestrictedApi")
 internal class PendingRootServiceBind @MainThread constructor(intent: Intent) {

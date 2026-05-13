@@ -1,5 +1,7 @@
-package be.mygod.librootkotlinx.impl
+package be.mygod.librootkotlinx.impl.libsu
 
+import be.mygod.librootkotlinx.impl.RootProcessOwnership
+import be.mygod.librootkotlinx.impl.RootProcessStdio
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
@@ -15,10 +17,10 @@ class RootProcessLauncherTest {
         val rewritten = RootProcessLauncher.rewriteCommand(
             command,
             "/data/app/pkg/base.apk",
-            " <${RootProcessLauncher.appFdPath(4, 123)}" +
-                    " >${RootProcessLauncher.appFdPath(5, 123)}" +
-                    " 2>${RootProcessLauncher.appFdPath(6, 123)}",
-            RootProcessLauncher.appFdPath(7, 123),
+            " <${RootProcessStdio.appFdPath(4, 123)}" +
+                    " >${RootProcessStdio.appFdPath(5, 123)}" +
+                    " 2>${RootProcessStdio.appFdPath(6, 123)}",
+            RootProcessStdio.appFdPath(7, 123),
             "nonce",
             "ownership",
         )
@@ -28,7 +30,7 @@ class RootProcessLauncherTest {
                     "(if command exec <'/proc/123/fd/4' >'/proc/123/fd/5' 2>'/proc/123/fd/6'; then " +
                     "printf '%s\\n' 'librootkotlinx-started:nonce' >&3; " +
                     "exec 3>&-; " +
-                    "${RootProcessMain.OWNERSHIP_SOCKET_ENV}='ownership' LIBSU_VERBOSE=1 " +
+                    "${RootProcessOwnership.SOCKET_ENV}='ownership' LIBSU_VERBOSE=1 " +
                     "CLASSPATH='/data/user_de/0/pkg/cache/main.jar:/data/app/pkg/base.apk' " +
                     "exec /system/bin/app_process64 -Xnoimage-dex2oat /system/bin --nice-name=pkg:root:0 " +
                     "${RootProcessMain::class.java.name} 'pkg/.RootService' 1000 start; " +
@@ -57,6 +59,6 @@ class RootProcessLauncherTest {
 
     @Test
     fun appFdPathUsesAppProcessPid() {
-        assertEquals("'/proc/123/fd/4'", RootProcessLauncher.appFdPath(4, 123))
+        assertEquals("'/proc/123/fd/4'", RootProcessStdio.appFdPath(4, 123))
     }
 }

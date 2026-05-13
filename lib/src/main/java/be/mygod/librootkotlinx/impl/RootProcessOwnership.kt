@@ -1,18 +1,28 @@
 package be.mygod.librootkotlinx.impl
 
+import android.net.LocalSocket
+import android.net.LocalSocketAddress
 import android.net.LocalServerSocket
 import android.os.Handler
 import android.os.Looper
 import android.os.Process
+import android.util.Log
 import be.mygod.librootkotlinx.Logger
 import be.mygod.librootkotlinx.net.ALocalServerSocket
 import be.mygod.librootkotlinx.net.ALocalSocket
+import io.ktor.utils.io.discard
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 import java.io.Closeable
 import java.io.IOException
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.system.exitProcess
 
+/**
+ * Owns the app/root rendezvous socket used to keep a detached libsu root process tied to one app-side server.
+ */
 internal class RootProcessOwnership : Closeable {
     val socketName = "librootkotlinx.${Process.myPid()}.${UUID.randomUUID()}"
     private val serverSocket = ALocalServerSocket(LocalServerSocket(socketName), Handler(Looper.getMainLooper()))
@@ -63,6 +73,48 @@ internal class RootProcessOwnership : Closeable {
             closeable.close()
         } catch (e: IOException) {
             Logger.me.w("Failed to close root process ownership resource", e)
+        }
+    }
+
+    companion object {
+        private const val TAG = "RootServer"
+        const val SOCKET_ENV = "LIBROOTKOTLINX_OWNERSHIP_SOCKET"
+
+        fun connectFromRootProcess(): LocalSocket {
+            val socketName = System.getenv(SOCKET_ENV) ?: throw IllegalStateException("$SOCKET_ENV is not set")
+            val socket = LocalSocket()
+            try {
+                socket.connect(LocalSocketAddress(socketName))
+                return socket
+            } catch (e: Throwable) {
+                try {
+                    socket.close()
+                } catch (closeError: IOException) {
+                    e.addSuppressed(closeError)
+                }
+                throw e
+            }
+        }
+
+        fun monitorRootProcess(socket: LocalSocket, scope: CoroutineScope) {
+            val handler = Handler(Looper.getMainLooper())
+            scope.launch {
+                val channel = ALocalSocket(socket, handler).openReadChannel()
+                var ownershipLost = false
+                try {
+                    channel.discard()
+                    Log.w(TAG, "Root process ownership revoked")
+                    ownershipLost = true
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Throwable) {
+                    Log.w(TAG, "Root process ownership monitor failed", e)
+                    ownershipLost = true
+                } finally {
+                    channel.cancel(null)
+                    if (ownershipLost) exitProcess(0)
+                }
+            }
         }
     }
 }

@@ -1,9 +1,8 @@
 package be.mygod.librootkotlinx
 
-import android.content.ComponentName
-import android.content.ServiceConnection
 import android.os.IBinder
 import be.mygod.librootkotlinx.impl.IRootCommandService
+import be.mygod.librootkotlinx.impl.RootServiceConnection
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -30,6 +29,7 @@ import org.junit.Before
 import org.junit.Test
 import java.lang.reflect.Method
 import java.lang.reflect.Proxy
+import sun.misc.Unsafe
 import kotlin.time.Duration.Companion.seconds
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -239,25 +239,33 @@ class RootSessionTest {
     }
 
     private fun RootServer.markActive() {
-        val connectedClass = RootServer::class.java.declaredClasses.single {
-            it.simpleName == "ConnectedRootService"
-        }
-        val connected = connectedClass.declaredConstructors.single().let {
-            it.isAccessible = true
-            it.newInstance(NoOpServiceConnection, proxy(IBinder::class.java), proxy(IRootCommandService::class.java), null)
-        }
         RootServer::class.java.getDeclaredField("connected").apply {
             isAccessible = true
-            set(this@markActive, connected)
+            set(this@markActive, connectedService())
         }
     }
 
-    private object NoOpServiceConnection : ServiceConnection {
-        override fun onServiceConnected(name: ComponentName, service: IBinder) = Unit
-        override fun onServiceDisconnected(name: ComponentName) = Unit
+    private fun connectedService() = RootServiceConnection.Connected(
+        rootServiceConnection(),
+        proxy(IBinder::class.java),
+        proxy(IRootCommandService::class.java),
+    )
+
+    private fun rootServiceConnection(): RootServiceConnection {
+        val connection = unsafe.allocateInstance(RootServiceConnection::class.java) as RootServiceConnection
+        RootServiceConnection::class.java.getDeclaredField("deathRecipient").apply {
+            isAccessible = true
+            set(connection, proxy(IBinder.DeathRecipient::class.java))
+        }
+        return connection
     }
 
     private companion object {
+        val unsafe: Unsafe = Unsafe::class.java.getDeclaredField("theUnsafe").let {
+            it.isAccessible = true
+            it.get(null) as Unsafe
+        }
+
         fun <T : Any> proxy(type: Class<T>): T = checkNotNull(type.cast(Proxy.newProxyInstance(
             type.classLoader,
             arrayOf(type),
