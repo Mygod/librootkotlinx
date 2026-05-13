@@ -34,16 +34,12 @@ internal class PendingRootServiceBind @MainThread constructor(intent: Intent) {
 
     @MainThread
     fun cancel() {
-        val pendingTasks = pendingTasks
         // RootServiceManager queues a BindTask lambda at pendingTasks[pendingIndex] before the root process is started.
         // libsu 6.0.0 has no named pending-task class to reflect, so keep the queued task object when bindOrTask returns
-        // and remove that object by identity if another pending bind shifted the list.
+        // or throws after queuing it, and remove that captured object if another pending bind shifted the list. Without
+        // a captured task, the original index no longer proves ownership and must not be removed.
         // https://github.com/topjohnwu/libsu/blob/4910d8dcc1ea3273246614b356fba56e1ce002a5/service/src/main/java/com/topjohnwu/superuser/internal/RootServiceManager.java#L284-L287
-        val pendingTask = pendingTask
-        val index = if (pendingTask != null) {
-            pendingTasks.indexOfFirst { it === pendingTask }.takeIf { it >= 0 }
-        } else pendingIndex.takeIf { it in pendingTasks.indices }
-        if (index != null) pendingTasks.removeAt(index)
+        pendingTask?.let { pendingTasks.remove(it) }
         flagsField.setInt(manager, flagsField.getInt(manager) and enRouteFlag.inv())
     }
 

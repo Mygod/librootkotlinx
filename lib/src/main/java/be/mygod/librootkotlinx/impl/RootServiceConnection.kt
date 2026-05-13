@@ -77,7 +77,10 @@ internal class RootServiceConnection(
                     }
                 }
             } catch (e: Throwable) {
-                if (pendingBind.ownsStartupIfQueued) clearPending = true
+                if (pendingBind.ownsStartupIfQueued) {
+                    pendingBind.captureQueuedTask()
+                    clearPending = true
+                }
                 throw e
             }
             if (task != null && canStartRootProcess()) {
