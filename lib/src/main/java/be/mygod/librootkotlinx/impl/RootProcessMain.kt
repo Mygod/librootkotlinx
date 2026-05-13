@@ -2,6 +2,7 @@ package be.mygod.librootkotlinx.impl
 
 import android.net.LocalSocket
 import android.net.LocalSocketAddress
+import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import be.mygod.librootkotlinx.io.openReadChannel
@@ -72,9 +73,9 @@ internal object RootProcessMain {
     }
 
     private fun monitorOwnership(socket: LocalSocket) {
-        val looper = Looper.getMainLooper()
+        val handler = Handler(Looper.getMainLooper())
         CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate).launch {
-            val channel = socket.fileDescriptor.openReadChannel(looper)
+            val channel = socket.fileDescriptor.openReadChannel(handler)
             try {
                 channel.discard()
                 Log.w(TAG, "Root process ownership revoked")

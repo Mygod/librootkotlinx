@@ -1,6 +1,8 @@
 package be.mygod.librootkotlinx
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.os.ParcelFileDescriptor
 import androidx.annotation.CallSuper
 import be.mygod.librootkotlinx.io.forEachLine
@@ -45,9 +47,10 @@ abstract class RootSession {
         stderr: ParcelFileDescriptor,
     ) {
         stdin.close()
+        val handler = Handler(Looper.getMainLooper())
         coroutineScope {
-            launch { stdout.openReadChannel().forEachLine(Logger.me::i) }
-            launch { stderr.openReadChannel().forEachLine(Logger.me::e) }
+            launch { stdout.openReadChannel(handler).forEachLine(Logger.me::i) }
+            launch { stderr.openReadChannel(handler).forEachLine(Logger.me::e) }
         }
     }
 

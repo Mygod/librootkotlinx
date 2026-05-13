@@ -2,6 +2,8 @@ package be.mygod.librootkotlinx.impl
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.os.Process
 import be.mygod.librootkotlinx.Logger
@@ -48,6 +50,7 @@ internal class RootProcessLauncher(
         onStartupCommandSubmitted: () -> Unit = {},
         onStartupStarted: () -> Unit = {},
     ) = coroutineScope {
+        val eventHandler = Handler(Looper.getMainLooper())
         val stdio = Stdio()
         val handlerStdio = stdio.takeHandlerStdio()
         val handlerCompletion = CompletableDeferred<Throwable?>()
@@ -88,7 +91,7 @@ internal class RootProcessLauncher(
             onStartupCommandSubmitted()
             stdio.closeMarkerWrite()
             try {
-                awaitStartupMarker(stdio, startupNonce)
+                awaitStartupMarker(stdio, startupNonce, eventHandler)
             } catch (e: Throwable) {
                 if (currentCoroutineContext().isActive) onStartupCommandFailed()
                 throw e
@@ -134,8 +137,8 @@ internal class RootProcessLauncher(
         )
     }
 
-    private suspend fun awaitStartupMarker(stdio: Stdio, startupNonce: String) {
-        val channel = stdio.openMarkerReadChannel()
+    private suspend fun awaitStartupMarker(stdio: Stdio, startupNonce: String, eventHandler: Handler) {
+        val channel = stdio.openMarkerReadChannel(eventHandler)
         val success = startupMarker(STARTUP_MARKER_STARTED, startupNonce)
         val failed = startupMarker(STARTUP_MARKER_FAILED, startupNonce)
         try {
@@ -204,7 +207,8 @@ internal class RootProcessLauncher(
             stderrRead = null
         }
 
-        fun openMarkerReadChannel() = checkNotNull(markerRead).openReadChannel().also { markerRead = null }
+        fun openMarkerReadChannel(eventHandler: Handler) =
+            checkNotNull(markerRead).openReadChannel(eventHandler).also { markerRead = null }
 
         fun closeMarkerWrite() {
             close(markerWrite)
@@ -297,8 +301,7 @@ internal class RootProcessLauncher(
         private fun startupMarker(prefix: String, nonce: String) = prefix + nonce
 
         private fun close(closeable: Closeable?) {
-            if (closeable == null) return
-            try {
+            if (closeable != null) try {
                 closeable.close()
             } catch (e: IOException) {
                 Logger.me.w("Failed to close root process resource", e)

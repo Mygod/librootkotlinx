@@ -5,7 +5,6 @@ package be.mygod.librootkotlinx.io
 
 import android.annotation.SuppressLint
 import android.os.Handler
-import android.os.Looper
 import android.os.MessageQueue
 import android.os.ParcelFileDescriptor
 import android.system.ErrnoException
@@ -29,15 +28,13 @@ import java.util.concurrent.atomic.AtomicBoolean
 /**
  * Read channel backed by a [FileDescriptor] registered on a [MessageQueue].
  */
-internal class FileDescriptorReadChannel(
+internal abstract class FileDescriptorReadChannel(
     private val fileDescriptor: FileDescriptor,
-    looper: Looper,
+    handler: Handler,
     private val buffer: ByteArray,
     private val channel: ByteChannel = ByteChannel(autoFlush = true),
-    private val closeDescriptor: () -> Unit,
 ) : ByteReadChannel by channel {
-    private val handler = Handler(looper)
-    private val eventAwaiter = FileDescriptorEventAwaiter(fileDescriptor, handler)
+    private val defaultEventAwaiter = lazy { FileDescriptorEventAwaiter(fileDescriptor, handler.looper.queue) }
     private val closed = AtomicBoolean()
     private val drainLock = Mutex()
     @Volatile
@@ -49,7 +46,7 @@ internal class FileDescriptorReadChannel(
         drainJob = CoroutineScope(handler.asCoroutineDispatcher("pfd-reader")).launch {
             try {
                 while (drainAvailable()) {
-                    eventAwaiter.await(MessageQueue.OnFileDescriptorEventListener.EVENT_INPUT)
+                    awaitEvent(MessageQueue.OnFileDescriptorEventListener.EVENT_INPUT)
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -109,7 +106,7 @@ internal class FileDescriptorReadChannel(
 
     private fun complete(cause: Throwable? = null) {
         val closeError = if (!closed.compareAndSet(false, true)) null else {
-            eventAwaiter.close()
+            closeEvents()
             try {
                 closeDescriptor()
                 null
@@ -130,31 +127,50 @@ internal class FileDescriptorReadChannel(
             channel.cancel(cause)
         }
     }
+
+    protected open val eventAwaiter: FileDescriptorEventAwaiter
+        get() = defaultEventAwaiter.value
+
+    protected open suspend fun awaitEvent(events: Int) = eventAwaiter.await(events)
+
+    protected open fun closeEvents() {
+        if (defaultEventAwaiter.isInitialized()) defaultEventAwaiter.value.close()
+    }
+
+    protected abstract fun closeDescriptor()
 }
 
 /**
  * Opens a read channel that owns this entire [ParcelFileDescriptor].
  *
+ * The descriptor is registered on [handler]'s [MessageQueue].
+ *
  * Closing or cancelling the returned channel closes the descriptor. This API does not provide socket-style half shutdown.
  */
 fun ParcelFileDescriptor.openReadChannel(
-    looper: Looper = Looper.getMainLooper(),
+    handler: Handler,
     buffer: ByteArray = ByteArray(DEFAULT_BUFFER_SIZE),
-): ByteReadChannel = FileDescriptorReadChannel(fileDescriptor, looper, buffer) { close() }
+): ByteReadChannel = object : FileDescriptorReadChannel(fileDescriptor, handler, buffer) {
+    override fun closeDescriptor() = close()
+}
 
 /**
  * Opens a read channel that owns this [FileDescriptor].
  *
+ * The descriptor is registered on [handler]'s [MessageQueue].
+ *
  * Closing or cancelling the returned channel closes the descriptor. This API does not provide socket-style half shutdown.
  */
 fun FileDescriptor.openReadChannel(
-    looper: Looper = Looper.getMainLooper(),
+    handler: Handler,
     buffer: ByteArray = ByteArray(DEFAULT_BUFFER_SIZE),
-): ByteReadChannel = FileDescriptorReadChannel(this, looper, buffer) {
-    try {
-        Os.close(this)
-    } catch (e: ErrnoException) {
-        throw IOException(e)
+): ByteReadChannel = object : FileDescriptorReadChannel(this, handler, buffer) {
+    override fun closeDescriptor() {
+        try {
+            Os.close(this@openReadChannel)
+        } catch (e: ErrnoException) {
+            throw IOException(e)
+        }
     }
 }
 

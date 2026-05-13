@@ -4,7 +4,6 @@
 package be.mygod.librootkotlinx.io
 
 import android.os.Handler
-import android.os.Looper
 import android.os.MessageQueue
 import android.os.ParcelFileDescriptor
 import android.system.ErrnoException
@@ -25,15 +24,13 @@ import java.util.concurrent.atomic.AtomicBoolean
 /**
  * Write channel backed by a [FileDescriptor] registered on a [MessageQueue].
  */
-internal class FileDescriptorWriteChannel(
+internal abstract class FileDescriptorWriteChannel(
     private val fileDescriptor: FileDescriptor,
-    looper: Looper,
+    handler: Handler,
     private val buffer: ByteArray,
     private val channel: ByteChannel = ByteChannel(),
-    private val closeFileDescriptor: () -> Unit,
 ) : ByteWriteChannel by channel {
-    private val handler = Handler(looper)
-    private val eventAwaiter = FileDescriptorEventAwaiter(fileDescriptor, handler)
+    private val defaultEventAwaiter = lazy { FileDescriptorEventAwaiter(fileDescriptor, handler.looper.queue) }
     private val closed = AtomicBoolean()
     private val drainJob: Deferred<Unit>
 
@@ -52,7 +49,7 @@ internal class FileDescriptorWriteChannel(
                         } catch (e: ErrnoException) {
                             when (e.errno) {
                                 OsConstants.EAGAIN -> {
-                                    eventAwaiter.await(MessageQueue.OnFileDescriptorEventListener.EVENT_OUTPUT)
+                                    awaitEvent(MessageQueue.OnFileDescriptorEventListener.EVENT_OUTPUT)
                                     continue
                                 }
                                 OsConstants.EINTR -> continue
@@ -62,7 +59,7 @@ internal class FileDescriptorWriteChannel(
                         if (written > 0) {
                             offset += written
                         } else {
-                            eventAwaiter.await(MessageQueue.OnFileDescriptorEventListener.EVENT_OUTPUT)
+                            awaitEvent(MessageQueue.OnFileDescriptorEventListener.EVENT_OUTPUT)
                         }
                     }
                 }
@@ -74,7 +71,7 @@ internal class FileDescriptorWriteChannel(
                 channel.cancel(e)
                 throw e
             } finally {
-                closeDescriptor()?.let { closeError ->
+                closeDescriptorOnce()?.let { closeError ->
                     failure?.addSuppressed(closeError) ?: throw closeError
                 }
             }
@@ -82,7 +79,7 @@ internal class FileDescriptorWriteChannel(
     }
 
     override fun cancel(cause: Throwable?) {
-        val closeError = closeDescriptor()
+        val closeError = closeDescriptorOnce()
         if (cause != null && closeError != null) cause.addSuppressed(closeError)
         channel.cancel(cause ?: closeError)
         drainJob.cancel()
@@ -101,40 +98,59 @@ internal class FileDescriptorWriteChannel(
         }
     }
 
-    private fun closeDescriptor(): IOException? {
+    private fun closeDescriptorOnce(): IOException? {
         if (!closed.compareAndSet(false, true)) return null
-        eventAwaiter.close()
+        closeEvents()
         return try {
-            closeFileDescriptor()
+            closeDescriptor()
             null
         } catch (e: IOException) {
             e
         }
     }
+
+    protected open val eventAwaiter: FileDescriptorEventAwaiter
+        get() = defaultEventAwaiter.value
+
+    protected open suspend fun awaitEvent(events: Int) = eventAwaiter.await(events)
+
+    protected open fun closeEvents() {
+        if (defaultEventAwaiter.isInitialized()) defaultEventAwaiter.value.close()
+    }
+
+    protected abstract fun closeDescriptor()
 }
 
 /**
  * Opens a write channel that owns this entire [ParcelFileDescriptor].
  *
+ * The descriptor is registered on [handler]'s [MessageQueue].
+ *
  * Closing or cancelling the returned channel closes the descriptor. This API does not provide socket-style half shutdown.
  */
 fun ParcelFileDescriptor.openWriteChannel(
-    looper: Looper = Looper.getMainLooper(),
+    handler: Handler,
     buffer: ByteArray = ByteArray(DEFAULT_BUFFER_SIZE),
-): ByteWriteChannel = FileDescriptorWriteChannel(fileDescriptor, looper, buffer) { close() }
+): ByteWriteChannel = object : FileDescriptorWriteChannel(fileDescriptor, handler, buffer) {
+    override fun closeDescriptor() = close()
+}
 
 /**
  * Opens a write channel that owns this [FileDescriptor].
  *
+ * The descriptor is registered on [handler]'s [MessageQueue].
+ *
  * Closing or cancelling the returned channel closes the descriptor. This API does not provide socket-style half shutdown.
  */
 fun FileDescriptor.openWriteChannel(
-    looper: Looper = Looper.getMainLooper(),
+    handler: Handler,
     buffer: ByteArray = ByteArray(DEFAULT_BUFFER_SIZE),
-): ByteWriteChannel = FileDescriptorWriteChannel(this, looper, buffer) {
-    try {
-        Os.close(this)
-    } catch (e: ErrnoException) {
-        throw IOException(e)
+): ByteWriteChannel = object : FileDescriptorWriteChannel(this, handler, buffer) {
+    override fun closeDescriptor() {
+        try {
+            Os.close(this@openWriteChannel)
+        } catch (e: ErrnoException) {
+            throw IOException(e)
+        }
     }
 }
