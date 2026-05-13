@@ -80,12 +80,12 @@ internal class RootProcessOwnership : Closeable {
         private const val TAG = "RootServer"
         const val SOCKET_ENV = "LIBROOTKOTLINX_OWNERSHIP_SOCKET"
 
-        fun connectFromRootProcess(): LocalSocket {
+        fun connectFromRootProcess(): LocalSocket = try {
             val socketName = System.getenv(SOCKET_ENV) ?: throw IllegalStateException("$SOCKET_ENV is not set")
             val socket = LocalSocket()
             try {
                 socket.connect(LocalSocketAddress(socketName))
-                return socket
+                socket
             } catch (e: Throwable) {
                 try {
                     socket.close()
@@ -94,6 +94,11 @@ internal class RootProcessOwnership : Closeable {
                 }
                 throw e
             }
+        } catch (e: Throwable) {
+            Log.e(TAG, "Failed to connect root process ownership socket", e)
+            e.printStackTrace()
+            System.err.flush()
+            exitProcess(1)
         }
 
         fun monitorRootProcess(socket: LocalSocket, scope: CoroutineScope) {

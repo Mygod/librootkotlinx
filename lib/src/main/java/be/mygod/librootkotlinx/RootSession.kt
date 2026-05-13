@@ -166,6 +166,7 @@ abstract class RootSession {
         timeoutJob = timeoutScope.launch(start = CoroutineStart.UNDISPATCHED) {
             delay(timeout)
             mutex.withLock {
+                // Mutex.lock does not check cancellation when it takes the uncontended fast path.
                 ensureActive()
                 check(leaseCount == 0L)
                 timeoutJob = null

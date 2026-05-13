@@ -26,14 +26,7 @@ internal object RootProcessMain {
             System.err.flush()
             exitProcess(1)
         }
-        val ownership = try {
-            RootProcessOwnership.connectFromRootProcess()
-        } catch (e: Throwable) {
-            Log.e(TAG, "Failed to connect root process ownership socket", e)
-            e.printStackTrace()
-            System.err.flush()
-            exitProcess(1)
-        }
+        val ownership = RootProcessOwnership.connectFromRootProcess()
         try {
             // Mirrors libsu RootServerMain.main after argument validation, except the first two lines that close
             // stdout/stderr. Keeping those descriptors open is the point of this entry point.
@@ -58,7 +51,6 @@ internal object RootProcessMain {
             Log.e(TAG, "Error in RootProcessMain", e)
             e.printStackTrace()
             System.err.flush()
-            exitProcess(1)
         }
         exitProcess(1)
     }

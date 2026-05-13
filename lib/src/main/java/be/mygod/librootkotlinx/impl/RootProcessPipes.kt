@@ -16,13 +16,13 @@ internal class RootProcessHandlerStdio(
     val stderr: ParcelFileDescriptor,
 ) : Closeable {
     override fun close() {
-        closeRootProcessResource(stdin)
-        closeRootProcessResource(stdout)
-        closeRootProcessResource(stderr)
+        closeRootProcessPipe(stdin)
+        closeRootProcessPipe(stdout)
+        closeRootProcessPipe(stderr)
     }
 }
 
-internal class RootProcessStdio {
+internal class RootProcessPipes {
     private var stdinRead: ParcelFileDescriptor?
     private var stdinWrite: ParcelFileDescriptor?
     private var stdoutRead: ParcelFileDescriptor?
@@ -66,19 +66,19 @@ internal class RootProcessStdio {
         checkNotNull(markerRead).openReadChannel(Handler(Looper.getMainLooper())).also { markerRead = null }
 
     fun closeMarkerWrite() {
-        closeRootProcessResource(markerWrite)
+        closeRootProcessPipe(markerWrite)
         markerWrite = null
     }
 
     fun closeRemaining() {
-        closeRootProcessResource(stdinRead)
-        closeRootProcessResource(stdinWrite)
-        closeRootProcessResource(stdoutRead)
-        closeRootProcessResource(stdoutWrite)
-        closeRootProcessResource(stderrRead)
-        closeRootProcessResource(stderrWrite)
-        closeRootProcessResource(markerRead)
-        closeRootProcessResource(markerWrite)
+        closeRootProcessPipe(stdinRead)
+        closeRootProcessPipe(stdinWrite)
+        closeRootProcessPipe(stdoutRead)
+        closeRootProcessPipe(stdoutWrite)
+        closeRootProcessPipe(stderrRead)
+        closeRootProcessPipe(stderrWrite)
+        closeRootProcessPipe(markerRead)
+        closeRootProcessPipe(markerWrite)
         stdinRead = null
         stdinWrite = null
         stdoutRead = null
@@ -96,10 +96,10 @@ internal class RootProcessStdio {
     }
 }
 
-private fun closeRootProcessResource(closeable: Closeable?) {
+private fun closeRootProcessPipe(closeable: Closeable?) {
     if (closeable != null) try {
         closeable.close()
     } catch (e: IOException) {
-        Logger.me.w("Failed to close root process resource", e)
+        Logger.me.w("Failed to close root process pipe", e)
     }
 }

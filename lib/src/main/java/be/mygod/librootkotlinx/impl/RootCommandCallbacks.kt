@@ -81,10 +81,7 @@ internal class RootCommandCallbacks {
         if (callback == null) callbacks.remove(id) != null else callbacks.remove(id, callback)
     }
 
-    fun handleResponse(
-        id: Long,
-        response: RootCommandResponse,
-    ): RootCommandResponseHandling {
+    fun handleResponse(id: Long, response: RootCommandResponse): RootCommandResponseHandling {
         val callback = synchronized(this) { callbacks[id] } ?: return RootCommandResponseHandling.Done
         return try {
             when (callback(response)) {

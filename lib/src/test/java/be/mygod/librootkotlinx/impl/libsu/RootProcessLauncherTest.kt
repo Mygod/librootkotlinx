@@ -1,7 +1,7 @@
 package be.mygod.librootkotlinx.impl.libsu
 
 import be.mygod.librootkotlinx.impl.RootProcessOwnership
-import be.mygod.librootkotlinx.impl.RootProcessStdio
+import be.mygod.librootkotlinx.impl.RootProcessPipes
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
@@ -17,10 +17,10 @@ class RootProcessLauncherTest {
         val rewritten = RootProcessLauncher.rewriteCommand(
             command,
             "/data/app/pkg/base.apk",
-            " <${RootProcessStdio.appFdPath(4, 123)}" +
-                    " >${RootProcessStdio.appFdPath(5, 123)}" +
-                    " 2>${RootProcessStdio.appFdPath(6, 123)}",
-            RootProcessStdio.appFdPath(7, 123),
+            " <${RootProcessPipes.appFdPath(4, 123)}" +
+                    " >${RootProcessPipes.appFdPath(5, 123)}" +
+                    " 2>${RootProcessPipes.appFdPath(6, 123)}",
+            RootProcessPipes.appFdPath(7, 123),
             "nonce",
             "ownership",
         )
@@ -59,6 +59,6 @@ class RootProcessLauncherTest {
 
     @Test
     fun appFdPathUsesAppProcessPid() {
-        assertEquals("'/proc/123/fd/4'", RootProcessStdio.appFdPath(4, 123))
+        assertEquals("'/proc/123/fd/4'", RootProcessPipes.appFdPath(4, 123))
     }
 }

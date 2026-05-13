@@ -2,7 +2,7 @@ package be.mygod.librootkotlinx.impl.libsu
 
 import android.annotation.SuppressLint
 import be.mygod.librootkotlinx.impl.RootProcessOwnership
-import be.mygod.librootkotlinx.impl.RootProcessStdio
+import be.mygod.librootkotlinx.impl.RootProcessPipes
 import com.topjohnwu.superuser.NoShellException
 import com.topjohnwu.superuser.Shell
 import com.topjohnwu.superuser.ShellUtils
@@ -21,7 +21,7 @@ import java.util.UUID
  * This mirrors the command emitted by libsu's RootServiceManager.createBindTask. The intentional changes are:
  * replacing libsu's RootServerMain with [RootProcessMain] so stdout/stderr stay open, extending CLASSPATH with the app
  * APK so that entry point is visible, injecting [RootProcessOwnership.SOCKET_ENV] so the app can revoke the detached
- * root process, redirecting stdio to [RootProcessStdio], and using a marker pipe to confirm the redirected child was
+ * root process, redirecting stdio to [RootProcessPipes], and using a marker pipe to confirm the redirected child was
  * actually started. App-side IO handling, ownership revocation, and RootServer lifecycle policy belong to
  * [be.mygod.librootkotlinx.impl.RootProcessHandle], not this class.
  */
@@ -31,47 +31,39 @@ internal class RootProcessLauncher(
     private val task: Shell.Task,
     private val ownershipSocketName: String,
 ) {
-    suspend fun launch(stdio: RootProcessStdio) {
+    suspend fun launch(pipes: RootProcessPipes) {
         val shell = runInterruptible(Dispatchers.IO) { Shell.getShell() }
         if (!shell.isRoot) throw NoShellException("Root shell is not available")
 
         val startupNonce = UUID.randomUUID().toString()
         runInterruptible(Dispatchers.IO) {
-            val command = createStartupCommand(stdio, startupNonce)
+            val startupCommand = rewriteCommand(
+                ByteArrayOutputStream().also {
+                    task.run(it, EmptyInputStream, EmptyInputStream)
+                }.toString(StandardCharsets.UTF_8.name()).trim(),
+                packageCodePath,
+                pipes.redirect,
+                pipes.markerRedirect,
+                startupNonce,
+                ownershipSocketName,
+            )
             // Job.exec waits for the foreground wrapper to open fd 3 before the app closes its marker writer.
-            val result = shell.newJob().add(command).to(null, null).exec()
+            val result = shell.newJob().add(startupCommand).to(null, null).exec()
             if (result.code == Shell.Result.JOB_NOT_EXECUTED) {
                 throw NoShellException("Root shell died before starting root service")
             }
             if (!result.isSuccess) throw IOException("Root service startup command failed with exit code ${result.code}")
         }
-        stdio.closeMarkerWrite()
-        awaitStartupMarker(stdio, startupNonce)
-    }
-
-    private fun createStartupCommand(stdio: RootProcessStdio, startupNonce: String): String {
-        val command = ByteArrayOutputStream().also {
-            task.run(it, EmptyInputStream, EmptyInputStream)
-        }.toString(StandardCharsets.UTF_8.name()).trim()
-        return rewriteCommand(
-            command,
-            packageCodePath,
-            stdio.redirect,
-            stdio.markerRedirect,
-            startupNonce,
-            ownershipSocketName,
-        )
-    }
-
-    private suspend fun awaitStartupMarker(stdio: RootProcessStdio, startupNonce: String) {
-        val channel = stdio.openMarkerReadChannel()
+        pipes.closeMarkerWrite()
+        val channel = pipes.openMarkerReadChannel()
         try {
-            while (true) when (channel.readLine()) {
-                startupMarker(STARTUP_MARKER_STARTED, startupNonce) -> return
-                startupMarker(STARTUP_MARKER_FAILED, startupNonce) -> {
+            while (true) {
+                val marker = channel.readLine()
+                if (marker == startupMarker(STARTUP_MARKER_STARTED, startupNonce)) break
+                if (marker == startupMarker(STARTUP_MARKER_FAILED, startupNonce)) {
                     throw IOException("Root service stdio redirection failed")
                 }
-                null -> throw IOException("Root service startup marker pipe closed")
+                if (marker == null) throw IOException("Root service startup marker pipe closed")
             }
         } finally {
             channel.cancel(null)

@@ -11,7 +11,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
@@ -30,18 +29,17 @@ internal class RootProcessHandle(
     private val launcher = RootProcessLauncher(packageCodePath, task, ownership.socketName)
 
     suspend fun run(rootServiceConnected: Job) = coroutineScope {
-        val stdio = RootProcessStdio()
-        val handlerCompletion = startRootIoHandler(this, stdio.takeHandlerStdio())
+        val pipes = RootProcessPipes()
+        val handlerCompletion = startRootIoHandler(this, pipes.takeHandlerStdio())
         try {
-            launcher.launch(stdio)
+            launcher.launch(pipes)
             val ownershipAccepted = async { ownership.accept() }
             select {
                 ownershipAccepted.onAwait { }
                 handlerCompletion.onAwait { throw RootIoExitException(it) }
             }
-            stdio.closeRemaining()
+            pipes.closeRemaining()
 
-            currentCoroutineContext().ensureActive()
             var handlerCompleted = false
             var handlerFailure: Throwable? = null
             select {
@@ -54,7 +52,7 @@ internal class RootProcessHandle(
             if (handlerCompleted && !rootServiceConnected.isCompleted) throw RootIoExitException(handlerFailure)
             handlerCompletion.await()
         } finally {
-            stdio.closeRemaining()
+            pipes.closeRemaining()
         }
     }
 

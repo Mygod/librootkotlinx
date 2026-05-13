@@ -87,9 +87,7 @@ internal class RootServiceConnection(
                     if (pendingBind.ownsStartupIfQueued) clearPending = true
                     throw e
                 }.also { this@RootServiceConnection.rootProcess = it }
-            } else {
-                null
-            }
+            } else null
         }
         if (rootProcess != null) startupJob = scope.launch {
             try {
@@ -145,39 +143,31 @@ internal class RootServiceConnection(
         val service: IRootCommandService,
     ) {
         suspend fun close(reason: String) {
-            connection.closeBoundRootService(this, reason)
+            try {
+                binder.unlinkToDeath(connection.deathRecipient, 0)
+            } catch (e: RuntimeException) {
+                Logger.me.w("Failed to unlink root service death recipient $reason", e)
+            }
+            try {
+                service.close()
+            } catch (e: RemoteException) {
+                Logger.me.w("Failed to close root service $reason", e)
+            }
+            connection.unbind("Failed to unbind root service connection $reason")
         }
 
         fun closeFromCallback(reason: String) {
-            connection.closeBoundRootServiceNow(this, reason)
-        }
-    }
-
-    private suspend fun closeBoundRootService(connected: Connected, reason: String) {
-        unlinkServiceDeathRecipient(connected.binder, "Failed to unlink root service death recipient $reason")
-        closeRemoteService(connected.service, "Failed to close root service $reason")
-        unbind("Failed to unbind root service connection $reason")
-    }
-
-    private fun closeBoundRootServiceNow(connected: Connected, reason: String) {
-        unlinkServiceDeathRecipient(connected.binder, "Failed to unlink root service death recipient $reason")
-        closeRemoteService(connected.service, "Failed to close root service $reason")
-        unbindNow("Failed to unbind root service connection $reason")
-    }
-
-    private fun unlinkServiceDeathRecipient(binder: IBinder, message: String) {
-        try {
-            binder.unlinkToDeath(deathRecipient, 0)
-        } catch (e: RuntimeException) {
-            Logger.me.w(message, e)
-        }
-    }
-
-    private fun closeRemoteService(service: IRootCommandService, message: String) {
-        try {
-            service.close()
-        } catch (e: RemoteException) {
-            Logger.me.w(message, e)
+            try {
+                binder.unlinkToDeath(connection.deathRecipient, 0)
+            } catch (e: RuntimeException) {
+                Logger.me.w("Failed to unlink root service death recipient $reason", e)
+            }
+            try {
+                service.close()
+            } catch (e: RemoteException) {
+                Logger.me.w("Failed to close root service $reason", e)
+            }
+            connection.unbindNow("Failed to unbind root service connection $reason")
         }
     }
 }
