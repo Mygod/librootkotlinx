@@ -2,7 +2,6 @@ package be.mygod.librootkotlinx.net
 
 import android.net.LocalServerSocket
 import android.os.Handler
-import android.os.MessageQueue
 import android.system.ErrnoException
 import android.system.OsConstants
 import be.mygod.librootkotlinx.io.FileDescriptorEventAwaiter
@@ -25,7 +24,7 @@ class ALocalServerSocket(val socket: LocalServerSocket, private val handler: Han
 
     suspend fun accept() = withContext(dispatcher) {
         while (true) {
-            eventAwaiter.await(MessageQueue.OnFileDescriptorEventListener.EVENT_INPUT)
+            eventAwaiter.await(input = true)
             try {
                 return@withContext ALocalSocket(socket.accept(), handler)
             } catch (e: IOException) {

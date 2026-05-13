@@ -46,7 +46,7 @@ internal abstract class FileDescriptorReadChannel(
         drainJob = CoroutineScope(handler.asCoroutineDispatcher("pfd-reader")).launch {
             try {
                 while (drainAvailable()) {
-                    awaitEvent(MessageQueue.OnFileDescriptorEventListener.EVENT_INPUT)
+                    awaitEvent(input = true)
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -131,7 +131,7 @@ internal abstract class FileDescriptorReadChannel(
     protected open val eventAwaiter: FileDescriptorEventAwaiter
         get() = defaultEventAwaiter.value
 
-    protected open suspend fun awaitEvent(events: Int) = eventAwaiter.await(events)
+    protected open suspend fun awaitEvent(input: Boolean) = eventAwaiter.await(input)
 
     protected open fun closeEvents() {
         if (defaultEventAwaiter.isInitialized()) defaultEventAwaiter.value.close()

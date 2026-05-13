@@ -49,7 +49,7 @@ internal abstract class FileDescriptorWriteChannel(
                         } catch (e: ErrnoException) {
                             when (e.errno) {
                                 OsConstants.EAGAIN -> {
-                                    awaitEvent(MessageQueue.OnFileDescriptorEventListener.EVENT_OUTPUT)
+                                    awaitEvent(input = false)
                                     continue
                                 }
                                 OsConstants.EINTR -> continue
@@ -59,7 +59,7 @@ internal abstract class FileDescriptorWriteChannel(
                         if (written > 0) {
                             offset += written
                         } else {
-                            awaitEvent(MessageQueue.OnFileDescriptorEventListener.EVENT_OUTPUT)
+                            awaitEvent(input = false)
                         }
                     }
                 }
@@ -112,7 +112,7 @@ internal abstract class FileDescriptorWriteChannel(
     protected open val eventAwaiter: FileDescriptorEventAwaiter
         get() = defaultEventAwaiter.value
 
-    protected open suspend fun awaitEvent(events: Int) = eventAwaiter.await(events)
+    protected open suspend fun awaitEvent(input: Boolean) = eventAwaiter.await(input)
 
     protected open fun closeEvents() {
         if (defaultEventAwaiter.isInitialized()) defaultEventAwaiter.value.close()

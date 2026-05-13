@@ -14,72 +14,56 @@ internal class FileDescriptorEventAwaiter(
     private val fileDescriptor: FileDescriptor,
     private val messageQueue: MessageQueue,
 ) : MessageQueue.OnFileDescriptorEventListener {
-    private val lock = Any()
     private var closed = false
     private var dispatching = false
     private var inputContinuation: CancellableContinuation<Unit>? = null
     private var outputContinuation: CancellableContinuation<Unit>? = null
 
-    suspend fun await(events: Int) {
-        check(events == MessageQueue.OnFileDescriptorEventListener.EVENT_INPUT ||
-                events == MessageQueue.OnFileDescriptorEventListener.EVENT_OUTPUT) {
-            "Only input or output readiness can be awaited"
-        }
-        suspendCancellableCoroutine { continuation ->
-            var cancelCause: CancellationException? = null
-            synchronized(lock) {
-                if (closed) {
-                    cancelCause = CancellationException("File descriptor listener closed")
+    suspend fun await(input: Boolean) = suspendCancellableCoroutine { continuation ->
+        var cancelCause: CancellationException? = null
+        synchronized(this) {
+            if (closed) cancelCause = CancellationException("File descriptor listener closed") else {
+                if (input) {
+                    check(inputContinuation == null) { "Already waiting for file descriptor input readiness" }
+                    inputContinuation = continuation
                 } else {
-                    when (events) {
-                        MessageQueue.OnFileDescriptorEventListener.EVENT_INPUT -> {
-                            check(inputContinuation == null) { "Already waiting for file descriptor input readiness" }
-                            inputContinuation = continuation
-                        }
-                        MessageQueue.OnFileDescriptorEventListener.EVENT_OUTPUT -> {
-                            check(outputContinuation == null) { "Already waiting for file descriptor output readiness" }
-                            outputContinuation = continuation
-                        }
-                    }
-                    continuation.invokeOnCancellation {
-                        synchronized(lock) {
-                            if (inputContinuation === continuation) inputContinuation = null
-                            if (outputContinuation === continuation) outputContinuation = null
-                            updateListenerLocked()
-                        }
-                    }
-                    updateListenerLocked()
+                    check(outputContinuation == null) { "Already waiting for file descriptor output readiness" }
+                    outputContinuation = continuation
                 }
+                continuation.invokeOnCancellation {
+                    synchronized(this) {
+                        if (inputContinuation === continuation) inputContinuation = null
+                        if (outputContinuation === continuation) outputContinuation = null
+                        updateListenerLocked()
+                    }
+                }
+                updateListenerLocked()
             }
-            cancelCause?.let { continuation.cancel(it) }
         }
+        cancelCause?.let { continuation.cancel(it) }
     }
 
     override fun onFileDescriptorEvents(fd: FileDescriptor, events: Int): Int {
         var inputContinuation: CancellableContinuation<Unit>? = null
         var outputContinuation: CancellableContinuation<Unit>? = null
-        synchronized(lock) {
+        synchronized(this) {
             if (closed) return 0
             dispatching = true
             inputContinuation = if (events and (
                     MessageQueue.OnFileDescriptorEventListener.EVENT_INPUT or
                     MessageQueue.OnFileDescriptorEventListener.EVENT_ERROR) != 0
-            ) {
-                this.inputContinuation.also { this.inputContinuation = null }
-            } else null
+            ) this.inputContinuation.also { this.inputContinuation = null } else null
             outputContinuation = if (events and (
                     MessageQueue.OnFileDescriptorEventListener.EVENT_OUTPUT or
                     MessageQueue.OnFileDescriptorEventListener.EVENT_ERROR) != 0
-            ) {
-                this.outputContinuation.also { this.outputContinuation = null }
-            } else null
+            ) this.outputContinuation.also { this.outputContinuation = null } else null
         }
-        var nextEvents = 0
+        var nextEvents: Int
         try {
-            resume(inputContinuation)
-            resume(outputContinuation)
+            if (inputContinuation?.isActive == true) inputContinuation.resume(Unit)
+            if (outputContinuation?.isActive == true) outputContinuation.resume(Unit)
         } finally {
-            nextEvents = synchronized(lock) {
+            nextEvents = synchronized(this) {
                 dispatching = false
                 listenerEventsLocked()
             }
@@ -91,7 +75,7 @@ internal class FileDescriptorEventAwaiter(
         var inputContinuation: CancellableContinuation<Unit>? = null
         var outputContinuation: CancellableContinuation<Unit>? = null
         var removeListener = false
-        synchronized(lock) {
+        synchronized(this) {
             if (closed) return
             closed = true
             inputContinuation = this.inputContinuation.also { this.inputContinuation = null }
@@ -120,10 +104,5 @@ internal class FileDescriptorEventAwaiter(
         if (outputContinuation != null) events = events or MessageQueue.OnFileDescriptorEventListener.EVENT_OUTPUT
         if (events != 0) events = events or MessageQueue.OnFileDescriptorEventListener.EVENT_ERROR
         return events
-    }
-
-    private fun resume(continuation: CancellableContinuation<Unit>?) {
-        if (continuation == null) return
-        if (continuation.isActive) continuation.resume(Unit)
     }
 }
