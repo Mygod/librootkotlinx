@@ -27,7 +27,7 @@ internal sealed class RootCommandCallback(protected val classLoader: ClassLoader
         }
 
         override fun invoke(response: RootCommandResponse) = RootCommandCallbackAction.Remove.also {
-            if (response.status == RootCommandResponse.SUCCESS) result.complete(response.payload)
+            if (response.status == RootCommandResponse.SUCCESS) result.complete(response.readPayload(classLoader))
             else result.completeExceptionally(response.readException(classLoader))
         }
     }
@@ -42,7 +42,7 @@ internal sealed class RootCommandCallback(protected val classLoader: ClassLoader
 
         override fun invoke(response: RootCommandResponse) = when (response.status) {
             RootCommandResponse.SUCCESS -> {
-                val result = channel.trySend(response.payload)
+                val result = channel.trySend(response.readPayload(classLoader))
                 when {
                     result.isClosed -> RootCommandCallbackAction.CancelRemote
                     result.isFailure -> RootCommandCallbackAction.CancelRemote.also {

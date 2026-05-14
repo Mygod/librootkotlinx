@@ -19,7 +19,7 @@ class RootCommandCallbacksTest {
 
         val handling = callbacks.handleResponse(
             registered.id,
-            RootCommandResponse(RootCommandResponse.SUCCESS, null),
+            RootCommandResponse.success(null),
         )
 
         assertEquals(RootCommandResponseHandling.Done, handling)
@@ -36,7 +36,7 @@ class RootCommandCallbacksTest {
 
         val handling = callbacks.handleResponse(
             registered.id,
-            RootCommandResponse(RootCommandResponse.SUCCESS, null),
+            RootCommandResponse.success(null),
         )
 
         assertEquals(RootCommandResponseHandling.CancelRemote, handling)
@@ -51,7 +51,7 @@ class RootCommandCallbacksTest {
 
         val handling = callbacks.handleResponse(
             registered.id,
-            RootCommandResponse(RootCommandResponse.EX_PARCELABLE, null),
+            RootCommandResponse.parcelableFailure(NonThrowableParcelable),
         )
 
         assertEquals(RootCommandResponseHandling.Done, handling)
@@ -75,5 +75,10 @@ class RootCommandCallbacksTest {
             assertEquals(cause.message, e.message)
         }
         assertFalse(callbacks.unregister(registered.id, registered.callback))
+    }
+
+    private object NonThrowableParcelable : Parcelable {
+        override fun describeContents() = 0
+        override fun writeToParcel(dest: android.os.Parcel, flags: Int) = Unit
     }
 }

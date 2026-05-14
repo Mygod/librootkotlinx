@@ -89,7 +89,7 @@ class RootServerTest {
         val registered = server.commandCallbacks().register { RootCommandCallback.Flow(null, channel) }
         channel.close()
 
-        server.callback().onResponse(registered.id, RootCommandResponse(RootCommandResponse.SUCCESS, null))
+        server.callback().onResponse(registered.id, RootCommandResponse.success(null))
 
         assertEquals(1, service.cancelCalls)
         assertFalse(server.commandCallbacks().unregister(registered.id, registered.callback))
@@ -103,7 +103,7 @@ class RootServerTest {
         val closeCause = CancellationException("closing")
         server.setCloseCause(closeCause)
 
-        server.callback().onResponse(registered.id, RootCommandResponse(RootCommandResponse.SUCCESS, null))
+        server.callback().onResponse(registered.id, RootCommandResponse.success(null))
 
         assertFalse(result.isCompleted)
         server.commandCallbacks().closeAll(closeCause)

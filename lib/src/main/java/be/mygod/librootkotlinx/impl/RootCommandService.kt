@@ -42,13 +42,13 @@ internal class RootCommandService : RootService() {
         override fun execute(id: Long, request: RootCommandRequest, callback: IRootCommandCallback) {
             when (val command = request.command) {
                 is RootCommand<*> -> launchCancellable(id, callback) {
-                    callback.sendResponse(id, RootCommandResponse(RootCommandResponse.SUCCESS, command.execute()))
+                    callback.sendResponse(id, RootCommandResponse.success(command.execute()))
                 }
                 is RootFlow<*> -> launchCancellable(id, callback) {
                     command.flow().collect { result ->
-                        callback.sendResponse(id, RootCommandResponse(RootCommandResponse.SUCCESS, result))
+                        callback.sendResponse(id, RootCommandResponse.success(result))
                     }
-                    callback.sendResponse(id, RootCommandResponse(RootCommandResponse.COMPLETE, null))
+                    callback.sendResponse(id, RootCommandResponse.complete)
                 }
                 else -> commandScope.launch {
                     callback.trySendThrowable(id, IllegalArgumentException("Unrecognized input: $command"))
@@ -92,15 +92,14 @@ internal class RootCommandService : RootService() {
     private suspend fun IRootCommandCallback.trySendThrowable(id: Long, throwable: Throwable) {
         try {
             sendResponse(id, if (throwable is Parcelable) {
-                RootCommandResponse(RootCommandResponse.EX_PARCELABLE, throwable)
+                RootCommandResponse.parcelableFailure(throwable)
             } else {
-                RootCommandResponse(RootCommandResponse.EX_THROWABLE, ParcelableThrowable(throwable))
+                RootCommandResponse.failure(ParcelableThrowable(throwable))
             })
         } catch (e: RemoteException) {
             Logger.me.w("Failed to deliver root command failure #$id", e)
             try {
-                sendResponse(id, RootCommandResponse(
-                    RootCommandResponse.EX_THROWABLE,
+                sendResponse(id, RootCommandResponse.failure(
                     ParcelableThrowable.Other(
                         "java.lang.IllegalStateException: Root command failed with ${throwable.javaClass.name}, " +
                             "but its failure payload could not be delivered",

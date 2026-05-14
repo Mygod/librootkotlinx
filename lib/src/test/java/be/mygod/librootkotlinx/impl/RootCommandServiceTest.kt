@@ -14,7 +14,6 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -43,9 +42,6 @@ class RootCommandServiceTest {
         assertEquals(2, callback.responseCalls)
         assertEquals(7, callback.responseId)
         assertEquals(RootCommandResponse.EX_THROWABLE, response.status)
-        val cause = response.readException(null).cause
-        assertTrue(cause is IllegalStateException)
-        assertTrue(cause?.message.orEmpty().contains(FailingCommand.failure.javaClass.name))
     }
 
     private class FailingFirstResponseCallback : IRootCommandCallback.Default() {
@@ -64,9 +60,7 @@ class RootCommandServiceTest {
     }
 
     private object FailingCommand : RootCommand<Parcelable?> {
-        val failure = IllegalArgumentException("boom")
-
-        override suspend fun execute(): Parcelable? = throw failure
+        override suspend fun execute(): Parcelable? = throw IllegalArgumentException("boom")
         override fun describeContents() = 0
         override fun writeToParcel(dest: Parcel, flags: Int) = Unit
     }

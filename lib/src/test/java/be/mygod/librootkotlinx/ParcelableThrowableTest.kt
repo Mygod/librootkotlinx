@@ -2,7 +2,6 @@ package be.mygod.librootkotlinx
 
 import android.os.Parcel
 import android.os.Parcelable
-import be.mygod.librootkotlinx.impl.RootCommandResponse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
@@ -13,10 +12,7 @@ class ParcelableThrowableTest {
     @Test
     fun parcelableThrowableUnwrapsOriginalCause() {
         val cause = ParcelableFailure("parcelable failure")
-        val exception = RootCommandResponse(
-            RootCommandResponse.EX_THROWABLE,
-            ParcelableThrowable(cause),
-        ).readException(ParcelableFailure::class.java.classLoader)
+        val exception = ParcelableThrowable(cause).unwrap(ParcelableFailure::class.java.classLoader)
 
         assertSame(cause, exception.cause)
     }
@@ -24,10 +20,7 @@ class ParcelableThrowableTest {
     @Test
     fun serializableThrowableUsesSuppliedClassLoader() {
         val loader = TrackingClassLoader(SerializableFailure::class.java.classLoader)
-        val exception = RootCommandResponse(
-            RootCommandResponse.EX_THROWABLE,
-            ParcelableThrowable(SerializableFailure("serializable failure")),
-        ).readException(loader)
+        val exception = ParcelableThrowable(SerializableFailure("serializable failure")).unwrap(loader)
 
         assertTrue(exception.cause is SerializableFailure)
         assertEquals("serializable failure", exception.cause?.message)
@@ -36,10 +29,8 @@ class ParcelableThrowableTest {
 
     @Test
     fun nonSerializableThrowableFallbackReturnsRemoteCause() {
-        val exception = RootCommandResponse(
-            RootCommandResponse.EX_THROWABLE,
-            ParcelableThrowable(NonSerializableFailure()),
-        ).readException(NonSerializableFailure::class.java.classLoader)
+        val exception = ParcelableThrowable(NonSerializableFailure())
+            .unwrap(NonSerializableFailure::class.java.classLoader)
         val cause = exception.cause
 
         assertTrue(cause is RuntimeException)
