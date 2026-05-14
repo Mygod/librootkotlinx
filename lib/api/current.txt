@@ -319,10 +319,14 @@ package be.mygod.librootkotlinx {
 
 package be.mygod.librootkotlinx.io {
 
+  public interface FileDescriptorByteReadChannel extends io.ktor.utils.io.ByteReadChannel {
+    method public suspend Object? drain(kotlin.coroutines.Continuation<? super kotlin.Unit>);
+  }
+
   public final class FileDescriptorChannels {
     method @InaccessibleFromKotlin public static boolean isNonblocking(java.io.FileDescriptor);
-    method public static io.ktor.utils.io.ByteReadChannel openReadChannel(android.os.ParcelFileDescriptor, android.os.Handler handler, optional byte[] buffer);
-    method public static io.ktor.utils.io.ByteReadChannel openReadChannel(java.io.FileDescriptor, android.os.Handler handler, optional byte[] buffer);
+    method public static be.mygod.librootkotlinx.io.FileDescriptorByteReadChannel openReadChannel(android.os.ParcelFileDescriptor, android.os.Handler handler, optional byte[] buffer);
+    method public static be.mygod.librootkotlinx.io.FileDescriptorByteReadChannel openReadChannel(java.io.FileDescriptor, android.os.Handler handler, optional byte[] buffer);
     method public static io.ktor.utils.io.ByteWriteChannel openWriteChannel(android.os.ParcelFileDescriptor, android.os.Handler handler, optional byte[] buffer);
     method public static io.ktor.utils.io.ByteWriteChannel openWriteChannel(java.io.FileDescriptor, android.os.Handler handler, optional byte[] buffer);
     method @InaccessibleFromKotlin public static void setNonblocking(java.io.FileDescriptor, boolean);
@@ -346,7 +350,7 @@ package be.mygod.librootkotlinx.net {
     ctor public ALocalSocket(android.net.LocalSocket socket, android.os.Handler handler);
     method public void close();
     method @InaccessibleFromKotlin public android.net.LocalSocket getSocket();
-    method public io.ktor.utils.io.ByteReadChannel openReadChannel(optional byte[] buffer);
+    method public be.mygod.librootkotlinx.io.FileDescriptorByteReadChannel openReadChannel(optional byte[] buffer);
     method public io.ktor.utils.io.ByteWriteChannel openWriteChannel(optional byte[] buffer);
     property public android.net.LocalSocket socket;
   }

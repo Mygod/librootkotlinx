@@ -3,7 +3,8 @@ package be.mygod.librootkotlinx.net
 import android.net.LocalSocket
 import android.os.Handler
 import be.mygod.librootkotlinx.io.FileDescriptorEventAwaiter
-import be.mygod.librootkotlinx.io.FileDescriptorReadChannel
+import be.mygod.librootkotlinx.io.FileDescriptorByteReadChannel
+import be.mygod.librootkotlinx.io.FileDescriptorByteReadChannelImpl
 import be.mygod.librootkotlinx.io.FileDescriptorWriteChannel
 import be.mygod.librootkotlinx.io.isNonblocking
 import io.ktor.utils.io.ByteReadChannel
@@ -31,10 +32,12 @@ class ALocalSocket(val socket: LocalSocket, private val handler: Handler) : Clos
      * Closing or cancelling the returned channel shuts down this socket's input half. Use [close] to close the whole
      * socket.
      */
-    fun openReadChannel(buffer: ByteArray = ByteArray(DEFAULT_BUFFER_SIZE)): ByteReadChannel = synchronized(lock) {
+    fun openReadChannel(
+        buffer: ByteArray = ByteArray(DEFAULT_BUFFER_SIZE),
+    ): FileDescriptorByteReadChannel = synchronized(lock) {
         check(!closed) { "Local socket closed" }
         check(readChannel == null) { "Read channel already opened" }
-        object : FileDescriptorReadChannel(socket.fileDescriptor, handler, buffer) {
+        object : FileDescriptorByteReadChannelImpl(socket.fileDescriptor, handler, buffer) {
             override val eventAwaiter get() = this@ALocalSocket.eventAwaiter
             override fun closeDescriptor() = socket.shutdownInput()
             override fun closeEvents() { }
