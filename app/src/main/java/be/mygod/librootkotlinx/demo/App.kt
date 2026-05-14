@@ -2,14 +2,13 @@ package be.mygod.librootkotlinx.demo
 
 import android.app.Application
 import android.util.Log
-import be.mygod.librootkotlinx.AppProcess
 import be.mygod.librootkotlinx.Logger
 import be.mygod.librootkotlinx.RootServer
 import be.mygod.librootkotlinx.RootSession
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
-import java.util.concurrent.TimeUnit
+import kotlin.time.Duration.Companion.seconds
 
 class App : Application() {
     companion object {
@@ -20,14 +19,15 @@ class App : Application() {
         super.onCreate()
         // simply initialize a global instance, this is a very lightweight operation
         rootManager = object : RootSession() {
-            override val timeout get() = TimeUnit.SECONDS.toMillis(5)
+            override val context get() = this@App
+            override val timeout get() = 5.seconds
             override suspend fun initServer(server: RootServer) {
                 if (BuildConfig.DEBUG) Logger.me = object : Logger {
                     override fun d(m: String?, t: Throwable?) {
                         Log.d("RootServer", m, t)
                     }
                 }
-                server.init(this@App, AppProcess.shouldRelocateHeuristics)
+                super.initServer(server)
             }
         }
         Log.d("App", "init")

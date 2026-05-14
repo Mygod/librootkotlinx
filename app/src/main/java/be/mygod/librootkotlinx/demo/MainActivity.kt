@@ -1,20 +1,19 @@
 package be.mygod.librootkotlinx.demo
 
-import android.os.Build
 import android.os.Bundle
-import android.os.Process
+import android.os.ParcelFileDescriptor
 import android.text.method.ScrollingMovementMethod
 import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.lifecycle.lifecycleScope
-import be.mygod.librootkotlinx.JniInit
 import be.mygod.librootkotlinx.ParcelableString
 import be.mygod.librootkotlinx.RootCommand
-import be.mygod.librootkotlinx.RootCommandChannel
-import kotlinx.coroutines.CoroutineScope
+import be.mygod.librootkotlinx.RootFlow
+import be.mygod.librootkotlinx.RootCommandNoResult
+import be.mygod.librootkotlinx.systemContext
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.channels.produce
-import kotlinx.coroutines.channels.toList
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.parcelize.Parcelize
@@ -22,25 +21,29 @@ import kotlinx.parcelize.Parcelize
 class MainActivity : ComponentActivity() {
     @Parcelize
     class SimpleTest : RootCommand<ParcelableString> {
-        override suspend fun execute() = ParcelableString("uid: " +
-                (if (Build.VERSION.SDK_INT >= 23) Jni.getuid() else Process.myUid()) + "\n" +
-                withContext(Dispatchers.IO) {
-                    // try to execute a restricted subprocess command
-                    val process = ProcessBuilder("/system/bin/iptables", "-L", "INPUT").start()
-                    var output = process.inputStream.reader().readText()
-                    when (val exit = process.waitFor()) {
-                        0 -> { }
-                        else -> output += "Process exited with $exit".toByteArray()
-                    }
-                    output
-                })
+        override suspend fun execute() = ParcelableString("context: ${systemContext.packageName}\nuid: ${Jni.getuid()}\n" + withContext(Dispatchers.IO) {
+            // Try to execute a restricted subprocess command.
+            val process = ProcessBuilder("/system/bin/iptables", "-L", "INPUT").start()
+            var output = process.inputStream.reader().readText()
+            when (val exit = process.waitFor()) {
+                0 -> { }
+                else -> output += "Process exited with $exit"
+            }
+            output
+        })
     }
 
     @Parcelize
-    class ChannelDemo : RootCommandChannel<ParcelableString> {
-        override fun create(scope: CoroutineScope) = scope.produce {
-            send(ParcelableString("Hello"))
-            send(ParcelableString("World"))
+    class FlowDemo : RootFlow<ParcelableString> {
+        override fun flow() = flowOf(ParcelableString("Hello"), ParcelableString("World"))
+    }
+
+    @Parcelize
+    class FileDescriptorDemo(private val output: ParcelFileDescriptor) : RootCommandNoResult {
+        override suspend fun execute() = null.also {
+            ParcelFileDescriptor.AutoCloseOutputStream(output).writer().use {
+                it.write("fd uid: ${Jni.getuid()}")
+            }
         }
     }
 
@@ -52,10 +55,17 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             text.text = try {
                 App.rootManager.use {
-                    // it is safe to call this multiple times if you don't feel like remembering in client
-                    if (Build.VERSION.SDK_INT >= 23) it.execute(JniInit())
-                    it.execute(SimpleTest()).value + '\n' + it.create(ChannelDemo(), lifecycleScope).toList()
-                        .joinToString { it.value }
+                    val pipe = ParcelFileDescriptor.createPipe()
+                    try {
+                        it.execute(FileDescriptorDemo(pipe[1]))
+                    } finally {
+                        pipe[1].close()
+                    }
+                    val fdResult = withContext(Dispatchers.IO) {
+                        ParcelFileDescriptor.AutoCloseInputStream(pipe[0]).bufferedReader().readText()
+                    }
+                    it.execute(SimpleTest()).value + '\n' + it.flow(FlowDemo()).toList()
+                        .joinToString { it.value } + "\n\n" + fdResult
                 }
             } catch (e: Exception) {
                 e.printStackTrace()

@@ -1,535 +1,374 @@
 package be.mygod.librootkotlinx
 
 import android.content.Context
-import android.os.Build
-import android.os.Looper
+import android.os.IBinder
 import android.os.Parcelable
+import android.os.ParcelFileDescriptor
 import android.os.RemoteException
-import android.system.ErrnoException
-import android.system.Os
-import android.system.OsConstants
-import androidx.collection.LongSparseArray
-import androidx.collection.valueIterator
+import be.mygod.librootkotlinx.impl.IRootCommandCallback
+import be.mygod.librootkotlinx.impl.IRootCommandService
+import be.mygod.librootkotlinx.impl.RegisteredRootCommandCallback
+import be.mygod.librootkotlinx.impl.RootCommandCallback
+import be.mygod.librootkotlinx.impl.RootCommandCallbacks
+import be.mygod.librootkotlinx.impl.RootCommandRequest
+import be.mygod.librootkotlinx.impl.RootCommandResponse
+import be.mygod.librootkotlinx.impl.RootCommandResponseHandling
+import be.mygod.librootkotlinx.impl.RootServiceConnection
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.channels.ClosedSendChannelException
 import kotlinx.coroutines.channels.SendChannel
-import kotlinx.coroutines.channels.consumeEach
-import kotlinx.coroutines.channels.onClosed
-import kotlinx.coroutines.channels.onFailure
-import kotlinx.coroutines.channels.produce
-import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.buffer
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
-import kotlinx.coroutines.withTimeoutOrNull
-import java.io.BufferedReader
-import java.io.ByteArrayOutputStream
-import java.io.DataInputStream
-import java.io.DataOutputStream
-import java.io.EOFException
-import java.io.File
-import java.io.FileDescriptor
-import java.io.FileNotFoundException
-import java.io.FileOutputStream
-import java.io.IOException
-import java.io.NotSerializableException
-import java.io.ObjectOutputStream
-import java.util.UUID
-import java.util.concurrent.CountDownLatch
-import kotlin.system.exitProcess
 
-class RootServer {
-    private sealed class Callback(private val server: RootServer, private val index: Long,
-                                  protected val classLoader: ClassLoader?) {
-        var active = true
+class RootServer internal constructor() {
+    class UnexpectedExitException : RemoteException("Root service exited unexpectedly")
 
-        abstract fun cancel(e: CancellationException? = null)
-        abstract fun shouldRemove(result: Byte): Boolean
-        abstract operator fun invoke(input: DataInputStream, result: Byte)
-        fun sendClosed() = server.execute(CancelCommand(index))
-
-        private fun makeRemoteException(cause: Throwable) =
-                if (cause is CancellationException) cause else RemoteException().initCause(cause)
-        protected fun DataInputStream.readException(result: Byte) = when (result.toInt()) {
-            EX_GENERIC -> makeRemoteException(ParcelableThrowable.parseThrowable(readUTF(), classLoader))
-            EX_PARCELABLE -> makeRemoteException(readParcelable<Parcelable>(classLoader) as Throwable)
-            EX_SERIALIZABLE -> makeRemoteException(ParcelableThrowable.parseSerializable(readByteArray(), classLoader)
-                    as Throwable)
-            else -> throw IllegalArgumentException("Unexpected result $result")
-        }
-
-        class Ordinary(server: RootServer, index: Long, classLoader: ClassLoader?,
-                       private val callback: CompletableDeferred<Parcelable?>) : Callback(server, index, classLoader) {
-            override fun cancel(e: CancellationException?) = callback.cancel(e)
-            override fun shouldRemove(result: Byte) = true
-            override fun invoke(input: DataInputStream, result: Byte) {
-                if (result.toInt() == SUCCESS) callback.complete(input.readParcelable(classLoader))
-                else callback.completeExceptionally(input.readException(result))
-            }
-        }
-
-        class Channel(server: RootServer, index: Long, classLoader: ClassLoader?,
-                      private val channel: SendChannel<Parcelable?>) : Callback(server, index, classLoader) {
-            val finish: CompletableDeferred<Unit> = CompletableDeferred()
-            override fun cancel(e: CancellationException?) = finish.cancel(e)
-            override fun shouldRemove(result: Byte) = result.toInt() != SUCCESS
-            override fun invoke(input: DataInputStream, result: Byte) {
-                when (result.toInt()) {
-                    SUCCESS -> channel.trySend(input.readParcelable(classLoader)).onClosed {
-                        active = false
-                        sendClosed()
-                        finish.completeExceptionally(it
-                            ?: ClosedSendChannelException("Channel was closed normally"))
-                        return
-                    }.onFailure { throw it!! }  // the channel we are supporting should never block
-                    CHANNEL_CONSUMED -> finish.complete(Unit)
-                    else -> finish.completeExceptionally(input.readException(result))
-                }
-            }
-        }
-    }
-
-    class LaunchException(cause: Throwable) : RuntimeException("Failed to launch root daemon", cause)
-    class UnexpectedExitException : RemoteException("Root process exited unexpectedly")
-
-    private lateinit var process: Process
-    /**
-     * Thread safety: needs to be protected by callbackLookup.
-     */
-    private lateinit var output: DataOutputStream
+    val active get() = connected != null && closeCause == null && serverJob.isActive
+    private val lifecycleLock = Any()
+    @Volatile
+    private var closeCause: Throwable? = null
+    private var lifecycleStarted = false
+    private val serverJob = Job()
+    private val serverScope = CoroutineScope(Dispatchers.Default + serverJob)
+    // Command submissions and lifecycle callbacks are serialized here. Root responses bypass this queue.
+    private val events = Channel<Event>(Channel.UNLIMITED)
+    private val started = CompletableDeferred<Unit>()
+    private val rootServiceConnected = Job()
+    private val commandCallbacks = RootCommandCallbacks()
 
     @Volatile
-    var active = false
-    private var counter = 0L
-    private var callbackListenerExit: Deferred<Unit>? = null
-    private val callbackLookup = LongSparseArray<Callback>()
+    private var connected: RootServiceConnection.Connected? = null
+    private var pendingConnection: RootServiceConnection? = null
 
-    private fun readUnexpectedStderr(): String? {
-        if (!this::process.isInitialized) return null
-        Logger.me.d("Attempting to read stderr")
-        var available = process.errorStream.available()
-        return if (available <= 0) null else String(ByteArrayOutputStream().apply {
-            try {
-                while (available > 0) {
-                    val bytes = ByteArray(available)
-                    val len = process.errorStream.read(bytes)
-                    if (len < 0) throw EOFException()   // should not happen
-                    write(bytes, 0, len)
-                    available = process.errorStream.available()
-                }
-            } catch (e: IOException) {
-                Logger.me.w("Reading stderr was cut short", e)
-            }
-        }.toByteArray())
+    private sealed interface Event {
+        data class Connected(val service: RootServiceConnection.Connected) : Event
+        data class StartupFailed(val connection: RootServiceConnection, val cause: Throwable) : Event
+        data class SendCommand(
+            val command: Parcelable,
+            val factory: (Long) -> RootCommandCallback,
+            val result: CompletableDeferred<RegisteredRootCommandCallback>,
+        ) : Event
+        data class CancelRemote(val id: Long, val callback: RootCommandCallback? = null) : Event
     }
 
-    private fun BufferedReader.lookForToken(token: String) {
-        while (true) {
-            val line = readLine() ?: throw EOFException()
-            if (line.endsWith(token)) {
-                val extraLength = line.length - token.length
-                if (extraLength > 0) Logger.me.w(line.substring(0, extraLength))
-                break
-            }
-            Logger.me.w(line)
+    // Session-scoped callback: multiplex by id to avoid leaking per-command Binder callback refs.
+    private val callback = object : IRootCommandCallback.Stub(), IBinder.DeathRecipient {
+        override fun onResponse(id: Long, response: RootCommandResponse) {
+            handleResponse(id, response)
         }
-    }
-    private fun doInit(context: Context, shouldRelocate: Boolean, niceName: String,
-                       appProcess: String = AppProcess.myExe) {
-        try {
-            val (reader, writer) = try {
-                process = ProcessBuilder("su").start()
-                val token1 = UUID.randomUUID().toString()
-                val writer = DataOutputStream(process.outputStream.buffered())
-                writer.writeBytes("echo $token1\n")
-                writer.flush()
-                val reader = process.inputStream.bufferedReader()
-                reader.lookForToken(token1)
-                Logger.me.d("Root shell initialized")
-                reader to writer
-            } catch (e: Exception) {
-                throw NoShellException(e)
-            }
-            try {
-                val token2 = UUID.randomUUID().toString()
-                writer.writeBytes(if (shouldRelocate) {
-                    val persistence = File((if (Build.VERSION.SDK_INT >= 24) {
-                        context.createDeviceProtectedStorageContext()
-                    } else context).codeCacheDir, ".librootkotlinx-uuid")
-                    val uuid = context.packageName + '@' + try {
-                        persistence.readText()
-                    } catch (_: FileNotFoundException) {
-                        UUID.randomUUID().toString().also { persistence.writeText(it) }
-                    }
-                    val (script, relocated) = AppProcess.relocateScript(uuid)
-                    script.appendLine(AppProcess.launchString(context.packageCodePath, RootServer::class.java.name,
-                        relocated, niceName) + " $token2")
-                    script.toString()
-                } else {
-                    AppProcess.launchString(context.packageCodePath, RootServer::class.java.name, appProcess,
-                        niceName) + " $token2\n"
-                })
-                writer.flush()
-                reader.lookForToken(token2) // wait for ready signal
-            } catch (e: Exception) {
-                if (appProcess == AppProcess.myExe && e is EOFException) try {
-                    doInit(context, shouldRelocate, niceName, AppProcess.myExeCanonical)
-                    Logger.me.d("Launched from fallback mode", e)
-                    return
-                } catch (e2: Exception) {
-                    throw e2.apply { addSuppressed(e) }
-                }
-                throw LaunchException(e)
-            }
-            output = writer
-            require(!active)
-            active = true
-            Logger.me.d("Root server initialized")
-        } finally {
-            try {
-                readUnexpectedStderr()?.let { Logger.me.e(it) }
-            } catch (e: IOException) {
-                Logger.me.e("Failed to read from stderr", e)    // avoid the real exception being swallowed
-            }
-        }
-    }
 
-    private fun callbackSpin() {
-        val input = DataInputStream(process.inputStream.buffered())
-        while (active) {
-            val index = try {
-                input.readLong()
-            } catch (_: EOFException) {
-                break
-            }
-            val result = input.readByte()
-            val callback = synchronized(callbackLookup) {
-                if (active) (callbackLookup[index] ?: error("Empty callback #$index")).also {
-                    if (it.shouldRemove(result)) {
-                        callbackLookup.remove(index)
-                        it.active = false
-                    }
-                } else null
-            } ?: break
-            try {
-                Logger.me.d("Received callback #$index: $result")
-                callback(input, result)
-            } catch (e: Throwable) {
-                callback.cancel(if (e is CancellationException) e else CancellationException().apply { initCause(e) })
-                throw e
-            }
+        override fun binderDied() {
+            requestClose(UnexpectedExitException())
         }
     }
 
     /**
-     * Initialize a RootServer synchronously, can throw a lot of exceptions.
+     * Initialize a RootServer by binding to a libsu RootService.
+     *
+     * Startup uses libsu's RootService bind handshake. [handleRootIo] is also used as a best-effort startup observer: if
+     * it returns or fails before the service connects, initialization fails. Custom handlers must stay suspended until
+     * startup completes; after startup, handler completion only ends IO handling. If the root-side service returns a null
+     * binding on API 23-27, libsu does not dispatch a null-binding callback, so callers that need bounded startup latency
+     * should apply their own timeout around initialization.
      *
      * @param context Any [Context] from the app.
-     * @param shouldRelocate Whether app process should be copied first. See also [AppProcess.shouldRelocateHeuristics].
-     * @param niceName Name to call the rooted Java process.
+     * @param handleRootIo Handler for observed root process stdin/stdout/stderr.
      */
-    @OptIn(DelicateCoroutinesApi::class)
-    suspend fun init(context: Context, shouldRelocate: Boolean = false,
-                     niceName: String = "${context.packageName}:root") {
-        if (AppProcess.hasStartupAgents(context)) Logger.me.w("JVMTI agent is enabled. Please enable the " +
-                "'Always install with package manager' option in Android Studio.")
-        withContext(Dispatchers.IO) { doInit(context, shouldRelocate, niceName) }
-        callbackListenerExit = GlobalScope.async(Dispatchers.IO) {
-            val errorReader = async(Dispatchers.IO) {
-                try {
-                    process.errorStream.bufferedReader().forEachLine(Logger.me::w)
-                } catch (_: IOException) { }
-            }
-            var cause: Throwable? = null
-            try {
-                callbackSpin()
-                if (active) throw UnexpectedExitException()
-            } catch (e: Throwable) {
-                cause = e
-                Logger.me.d("Shutting down from worker due to error", e)
-                process.destroy()
-                if (e !is EOFException) throw e
-            } finally {
-                Logger.me.d("Waiting for exit")
-                withContext(NonCancellable) { errorReader.await() }
-                process.waitFor()
-                closeInternal(cause)
-            }
+    internal suspend fun init(
+        context: Context,
+        handleRootIo: suspend (ParcelFileDescriptor, ParcelFileDescriptor, ParcelFileDescriptor) -> Unit,
+    ) {
+        synchronized(lifecycleLock) {
+            require(!lifecycleStarted && closeCause == null) { "RootServer is already initialized or closed" }
+            lifecycleStarted = true
         }
-    }
-
-    /**
-     * Caller should check for active.
-     */
-    private fun sendLocked(command: Parcelable) {
+        // Start immediately so a close racing with init cannot cancel before cleanup is installed.
+        serverScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            runLifecycle(context, handleRootIo)
+        }
         try {
-            output.writeParcelable(command)
-            output.flush()
-        } catch (e: IOException) {
-            if (e.isEBADF || (e.cause as? ErrnoException)?.errno == OsConstants.EPIPE) {
-                throw CancellationException().initCause(e)
-            } else throw e
+            started.await()
+        } catch (e: Throwable) {
+            serverJob.cancel(e.asCancellationException())
+            withContext(NonCancellable) { serverJob.join() }
+            throw e
         }
-        Logger.me.d("Sent #$counter: $command")
-        counter++
+        Logger.me.d("Root server initialized")
     }
 
-    fun execute(command: RootCommandOneWay) = synchronized(callbackLookup) { if (active) sendLocked(command) }
+    @Throws(RemoteException::class)
+    @DelicateCoroutinesApi
+    fun execute(command: RootCommandOneWay) {
+        val remote = connectedServiceOrThrow()
+        try {
+            remote.executeOneWay(RootCommandRequest(command))
+        } catch (e: RemoteException) {
+            requestClose(e)
+            throw e
+        }
+    }
+
     @Throws(RemoteException::class)
     suspend inline fun <T : Parcelable?, reified C : RootCommand<T>> execute(command: C) =
         execute(command, C::class.java.classLoader)
+
+    /**
+     * Executes [command] in the root service and returns its result.
+     *
+     * Once command submission is accepted, coroutine cancellation no longer guarantees that the root command has not
+     * started. Cancellation waits for the command id and then asks the root service to cancel the command best-effort.
+     */
     @Throws(RemoteException::class)
     suspend fun <T : Parcelable?> execute(command: RootCommand<T>, classLoader: ClassLoader?): T {
-        val future = CompletableDeferred<T>()
-        val callback = synchronized(callbackLookup) {
-            @Suppress("UNCHECKED_CAST")
-            val callback = Callback.Ordinary(this, counter, classLoader, future as CompletableDeferred<Parcelable?>)
-            if (active) {
-                callbackLookup.append(counter, callback)
-                sendLocked(command)
-            } else future.cancel()
-            callback
+        val result = CompletableDeferred<T>()
+        @Suppress("UNCHECKED_CAST")
+        val registered = send(command) {
+            RootCommandCallback.Ordinary(classLoader, result as CompletableDeferred<Parcelable?>)
         }
         try {
-            return future.await()
+            return result.await()
         } finally {
-            if (callback.active) callback.sendClosed()
-            callback.active = false
+            cancelRemote(registered.id, registered.callback)
         }
     }
 
-    @ExperimentalCoroutinesApi
-    @Throws(RemoteException::class)
-    inline fun <T : Parcelable?, reified C : RootCommandChannel<T>> create(command: C, scope: CoroutineScope) =
-        create(command, scope, C::class.java.classLoader)
-    @ExperimentalCoroutinesApi
-    @Throws(RemoteException::class)
-    fun <T : Parcelable?> create(command: RootCommandChannel<T>, scope: CoroutineScope,
-                                 classLoader: ClassLoader?) = scope.produce<T>(
-            SupervisorJob(), command.capacity.also {
-                when (it) {
-                    Channel.UNLIMITED, Channel.CONFLATED -> { }
-                    else -> throw IllegalArgumentException("Unsupported channel capacity $it")
-                }
-            }) {
-        val callback = synchronized(callbackLookup) {
-            @Suppress("UNCHECKED_CAST")
-            val callback = Callback.Channel(this@RootServer, counter, classLoader, this as SendChannel<Parcelable?>)
-            if (active) {
-                callbackLookup.append(counter, callback)
-                sendLocked(command)
-            } else callback.finish.cancel()
-            callback
-        }
-        try {
-            callback.finish.await()
-        } finally {
-            if (callback.active) callback.sendClosed()
-            callback.active = false
-        }
-    }
-
-    private fun closeInternal(cause: Throwable? = null) = synchronized(callbackLookup) {
-        if (active) {
-            active = false
-            try {
-                sendLocked(Shutdown())
-                output.close()
-                process.outputStream.close()
-            } catch (_: CancellationException) {
-            } catch (e: IOException) {
-                Logger.me.w("send Shutdown failed", e)
-            }
-            Logger.me.d("Client closed")
-        }
-        for (callback in callbackLookup.valueIterator()) callback.cancel(
-            if (cause is CancellationException) cause else CancellationException().apply { initCause(cause) })
-        callbackLookup.clear()
-    }
     /**
-     * Shutdown the instance gracefully.
+     * Creates a cold [Flow] backed by [source] in the root service.
+     *
+     * Each collection registers a new remote command and starts one root-side [RootFlow.flow] collection. Cancelling the
+     * client collector unregisters that command and asks the root service to cancel its job. Root responses are delivered
+     * through one-way Binder callbacks, so app-side Flow operators do not backpressure root-side emission. Once command
+     * submission is accepted, collector cancellation is best-effort remote cancellation rather than a guarantee that the
+     * root flow has not started.
+     */
+    inline fun <T : Parcelable?, reified C : RootFlow<T>> flow(source: C) = flow(source, C::class.java.classLoader)
+
+    /**
+     * Creates a cold [Flow] backed by [source] in the root service.
+     *
+     * Each collection registers a new remote command and starts one root-side [RootFlow.flow] collection. Cancelling the
+     * client collector unregisters that command and asks the root service to cancel its job. Root responses are delivered
+     * through one-way Binder callbacks, so app-side Flow operators do not backpressure root-side emission. Once command
+     * submission is accepted, collector cancellation is best-effort remote cancellation rather than a guarantee that the
+     * root flow has not started.
+     */
+    fun <T : Parcelable?> flow(source: RootFlow<T>, classLoader: ClassLoader?): Flow<T> = callbackFlow<T> {
+        @Suppress("UNCHECKED_CAST")
+        val channel = this as SendChannel<Parcelable?>
+        val registered = this@RootServer.send(source) {
+            RootCommandCallback.Flow(classLoader, channel)
+        }
+        try {
+            awaitClose()
+        } finally {
+            cancelRemote(registered.id, registered.callback)
+        }
+    }.buffer(Channel.UNLIMITED)
+
+    /**
+     * Close the instance gracefully.
      */
     suspend fun close() {
         Logger.me.d("Shutting down from client")
-        closeInternal()
-        val callbackListenerExit = callbackListenerExit ?: return
+        val cause = closeCause ?: CancellationException("Root server closed")
+        recordCloseCause(cause)
+        serverJob.cancel(cause.asCancellationException())
+        serverJob.join()
+    }
+
+    private suspend fun CoroutineScope.runLifecycle(
+        context: Context,
+        handleRootIo: suspend (ParcelFileDescriptor, ParcelFileDescriptor, ParcelFileDescriptor) -> Unit,
+    ) {
         try {
-            withTimeout(10000) { callbackListenerExit.await() }
-        } catch (e: TimeoutCancellationException) {
-            Logger.me.w("Closing the instance has timed out", e)
-            if (Build.VERSION.SDK_INT < 26) process.destroy() else if (process.isAlive) process.destroyForcibly()
-        } catch (e: UnexpectedExitException) {
-            Logger.me.w(e.message)
+            RootServiceConnection(
+                context,
+                callback,
+                handleRootIo,
+                canStartRootProcess = { closeCause == null },
+                onConnected = { trySendEvent(Event.Connected(it)) },
+                onCloseRequested = ::requestClose,
+                onUnexpectedExit = { UnexpectedExitException() },
+                onStartupFailed = { connection, cause -> trySendEvent(Event.StartupFailed(connection, cause)) },
+            ).also {
+                pendingConnection = it
+                it.bind(this, rootServiceConnected)
+            }
+            receiveUntilConnected()
+            receiveUntilClosed()
+        } catch (e: Throwable) {
+            recordCloseCause(e)
+        } finally {
+            cleanup()
+            serverJob.complete()
         }
     }
 
-    companion object {
-        private const val SUCCESS = 0
-        private const val EX_GENERIC = 1
-        private const val EX_PARCELABLE = 2
-        private const val EX_SERIALIZABLE = 4
-        private const val CHANNEL_CONSUMED = 3
+    private suspend fun receiveUntilConnected() {
+        while (closeCause == null && connected == null) handleEvent(events.receive())
+    }
 
-        private fun DataInputStream.readByteArray() = ByteArray(readInt()).also { readFully(it) }
+    private suspend fun receiveUntilClosed() {
+        while (closeCause == null) handleEvent(events.receive())
+    }
 
-        private inline fun <reified T : Parcelable> DataInputStream.readParcelable(classLoader: ClassLoader?) =
-            readByteArray().toParcelable<T>(classLoader)
-        private fun DataOutputStream.writeParcelable(data: Parcelable?, parcelableFlags: Int = 0) {
-            val bytes = data.toByteArray(parcelableFlags)
-            writeInt(bytes.size)
-            write(bytes)
-        }
-
-        @JvmStatic
-        fun main(args: Array<String>) {
-            Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
-                Logger.me.e("Uncaught exception from $thread", throwable)
-                throwable.printStackTrace()     // stderr will be read by listener
-                exitProcess(1)
+    @OptIn(DelicateCoroutinesApi::class)
+    private suspend fun handleEvent(event: Event) {
+        when (event) {
+            is Event.Connected -> handleConnected(event)
+            is Event.StartupFailed -> if (connected == null) {
+                if (pendingConnection === event.connection) event.connection.markStartupFailed()
+                recordCloseCause(event.cause)
             }
-            rootMain(args)
-            exitProcess(0)  // there might be other non-daemon threads
+            is Event.SendCommand -> sendCommand(event)
+            is Event.CancelRemote -> cancelRemoteOwned(event.id, event.callback)?.let(::recordCloseCause)
         }
+    }
 
-        private fun DataOutputStream.pushThrowable(callback: Long, e: Throwable) {
-            writeLong(callback)
-            if (e is Parcelable) {
-                writeByte(EX_PARCELABLE)
-                writeParcelable(e)
-            } else try {
-                val bytes = ByteArrayOutputStream().apply {
-                    ObjectOutputStream(this).use { it.writeObject(e) }
-                }.toByteArray()
-                writeByte(EX_SERIALIZABLE)
-                writeInt(bytes.size)
-                write(bytes)
-            } catch (_: NotSerializableException) {
-                writeByte(EX_GENERIC)
-                writeUTF(e.stackTraceToString())
-            }
-            flush()
+    private suspend fun handleConnected(event: Event.Connected) {
+        val service = event.service
+        if (connected == null && closeCause == null) {
+            connected = service
+            if (pendingConnection === service.connection) pendingConnection = null
+            rootServiceConnected.complete()
+            started.complete(Unit)
+        } else {
+            service.close("after cancelled bind")
         }
-        private fun DataOutputStream.pushResult(callback: Long, result: Parcelable?) {
-            writeLong(callback)
-            writeByte(SUCCESS)
-            writeParcelable(result)
-            flush()
+    }
+
+    private fun handleResponse(id: Long, response: RootCommandResponse) {
+        val handling = synchronized(lifecycleLock) {
+            if (closeCause == null) commandCallbacks.handleResponse(id, response) else RootCommandResponseHandling.Done
         }
+        if (handling == RootCommandResponseHandling.CancelRemote) cancelRemoteSubmitted(id)?.let(::requestClose)
+    }
 
-        private fun rootMain(args: Array<String>) {
-            require(args.isNotEmpty())
-            val mainInitialized = CountDownLatch(1)
-            val main = Thread({
-                @Suppress("DEPRECATION")
-                Looper.prepareMainLooper()
-                mainInitialized.countDown()
-                Looper.loop()
-            }, "main")
-            main.start()
-            val job = Job()
-            val defaultWorker by lazy {
-                mainInitialized.await()
-                CoroutineScope(Dispatchers.Main.immediate + job)
-            }
-            val callbackWorker by lazy {
-                mainInitialized.await()
-                Dispatchers.IO.limitedParallelism(1, "callbackWorker")
-            }
-            // access to cancellables shall be wrapped in defaultWorker
-            val cancellables = LongSparseArray<() -> Unit>()
+    private fun sendCommand(event: Event.SendCommand) {
+        val remote = connected?.service
+        if (remote == null) {
+            event.result.completeExceptionally(unavailableCause())
+            return
+        }
+        val registered = try {
+            commandCallbacks.register(event.factory)
+        } catch (e: Throwable) {
+            event.result.completeExceptionally(e)
+            return
+        }
+        try {
+            remote.execute(registered.id, RootCommandRequest(event.command), callback)
+            Logger.me.d("Sent #${registered.id}: ${event.command}")
+            event.result.complete(registered)
+        } catch (e: Throwable) {
+            commandCallbacks.unregister(registered.id, registered.callback)
+            registered.callback.close(e)
+            event.result.completeExceptionally(e)
+            if (e is RemoteException) recordCloseCause(e)
+        }
+    }
 
-            // thread safety: usage of output should be guarded by callbackWorker
-            val output = DataOutputStream(FileOutputStream(Os.dup(FileDescriptor.out)).buffered().apply {
-                // prevent future write attempts to System.out, possibly from Samsung changes (again)
-                Os.dup2(FileDescriptor.err, OsConstants.STDOUT_FILENO)
-                System.setOut(System.err)
-                val writer = writer()
-                writer.appendLine(args[0])  // echo ready signal
-                writer.flush()
-            })
-            // thread safety: usage of input should be in main thread
-            val input = DataInputStream(System.`in`.buffered())
-            var counter = 0L
-            Logger.me.d("Server entering main loop")
-            loop@ while (true) {
-                val command = try {
-                    input.readParcelable<Parcelable>(RootServer::class.java.classLoader)
-                } catch (_: EOFException) {
-                    break
+    private fun cancelRemoteOwned(id: Long, commandCallback: RootCommandCallback? = null): RemoteException? {
+        if (!commandCallbacks.unregister(id, commandCallback)) return null
+        return cancelRemoteSubmitted(id)
+    }
+
+    private fun cancelRemoteSubmitted(id: Long): RemoteException? {
+        val remote = connected?.service ?: return null
+        if (!active) return null
+        return try {
+            remote.cancel(id)
+            null
+        } catch (e: RemoteException) {
+            e
+        }
+    }
+
+    private fun connectedServiceOrThrow(): IRootCommandService {
+        val remote = connected?.service
+        if (remote == null || !active) {
+            throw unavailableCause()
+        }
+        return remote
+    }
+
+    // Non-suspending Binder/service callbacks record the terminal state first, then cancel the server lifetime.
+    private fun requestClose(cause: Throwable): Boolean {
+        if (!recordCloseCause(cause)) return false
+        serverJob.cancel(cause.asCancellationException())
+        return true
+    }
+
+    private fun recordCloseCause(cause: Throwable): Boolean = synchronized(lifecycleLock) {
+        if (closeCause == null) {
+            closeCause = cause
+            true
+        } else {
+            false
+        }
+    }
+
+    private suspend fun cleanup() {
+        val cause = closeCause ?: CancellationException("Root server closed")
+        val connected = connected
+        val pendingConnection = pendingConnection
+        recordCloseCause(cause)
+        rootServiceConnected.cancel(cause.asCancellationException())
+        events.close(cause)
+        if (!started.isCompleted) {
+            if (cause is CancellationException) started.cancel(cause)
+            else started.completeExceptionally(cause)
+        }
+        val connection = connected?.connection ?: pendingConnection
+        withContext(NonCancellable) {
+            while (true) {
+                when (val event = events.tryReceive().getOrNull() ?: break) {
+                    is Event.SendCommand -> event.result.completeExceptionally(cause)
+                    else -> Unit
                 }
-                val callback = counter
-                Logger.me.d("Received #$callback: $command")
-                when (command) {
-                    is CancelCommand -> defaultWorker.launch { cancellables[command.index]?.invoke() }
-                    is RootCommandOneWay -> defaultWorker.launch {
-                        try {
-                            command.execute()
-                        } catch (e: Throwable) {
-                            Logger.me.e("Unexpected exception in RootCommandOneWay ($command.javaClass.simpleName)", e)
-                        }
-                    }
-                    is RootCommand<*> -> {
-                        val commandJob = Job()
-                        defaultWorker.launch(commandJob) {
-                            cancellables.append(callback) { commandJob.cancel() }
-                            val result = try {
-                                val result = command.execute();
-                                { output.pushResult(callback, result) }
-                            } catch (e: Throwable) {
-                                val worker = { output.pushThrowable(callback, e) }
-                                worker
-                            } finally {
-                                cancellables.remove(callback)
-                            }
-                            withContext(callbackWorker + NonCancellable) { result() }
-                        }
-                    }
-                    is RootCommandChannel<*> -> defaultWorker.launch {
-                        val result = try {
-                            coroutineScope {
-                                command.create(this).also {
-                                    cancellables.append(callback) { it.cancel() }
-                                }.consumeEach { result ->
-                                    withContext(callbackWorker) { output.pushResult(callback, result) }
-                                }
-                            };
-                            @Suppress("BlockingMethodInNonBlockingContext") {
-                                output.writeLong(callback)
-                                output.writeByte(CHANNEL_CONSUMED)
-                                output.flush()
-                            }
-                        } catch (e: Throwable) {
-                            val worker = { output.pushThrowable(callback, e) }
-                            worker
-                        } finally {
-                            cancellables.remove(callback)
-                        }
-                        withContext(callbackWorker + NonCancellable) { result() }
-                    }
-                    is Shutdown -> break@loop
-                    else -> throw IllegalArgumentException("Unrecognized input: $command")
-                }
-                counter++
             }
-            job.cancel()
-            Logger.me.d("Clean up initiated before exit. Jobs: ${job.children.joinToString()}")
-            if (runBlocking { withTimeoutOrNull(5000) { job.join() } } == null) {
-                Logger.me.w("Clean up timeout: ${job.children.joinToString()}")
-            } else Logger.me.d("Clean up finished, exiting")
+            commandCallbacks.closeAll(cause)
+            connection?.close(cause.asCancellationException(), connected)
+            this@RootServer.connected = null
+            this@RootServer.pendingConnection = null
+        }
+    }
+
+    private suspend fun send(
+        command: Parcelable,
+        factory: (Long) -> RootCommandCallback,
+    ): RegisteredRootCommandCallback {
+        val result = CompletableDeferred<RegisteredRootCommandCallback>()
+        if (!trySendClientEvent(Event.SendCommand(command, factory, result))) throw unavailableCause()
+        // After the event is accepted, cancellation must wait for the id needed to cancel remote work.
+        return withContext(NonCancellable) { result.await() }
+    }
+
+    private fun cancelRemote(id: Long, commandCallback: RootCommandCallback? = null) {
+        trySendEvent(Event.CancelRemote(id, commandCallback))
+    }
+
+    private fun trySendClientEvent(event: Event) = active && trySendEvent(event)
+
+    private fun trySendEvent(event: Event) = events.trySend(event).isSuccess
+
+    private fun unavailableCause() = closeCause ?: UnexpectedExitException()
+
+    private companion object {
+        fun Throwable.asCancellationException() = when (this) {
+            is CancellationException -> this
+            else -> CancellationException(message).also { it.initCause(this) }
         }
     }
 }

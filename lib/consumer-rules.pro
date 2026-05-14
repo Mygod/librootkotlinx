@@ -1,14 +1,14 @@
--if public class be.mygod.librootkotlinx.RootServer {
-    private void doInit(android.content.Context, boolean, java.lang.String, java.lang.String);
-}
--keep class be.mygod.librootkotlinx.RootServer {
+# RootProcessLauncher swaps libsu's generated RootServerMain command for our stdio-preserving entry point.
+-if class be.mygod.librootkotlinx.impl.libsu.RootProcessLauncher
+-keep class be.mygod.librootkotlinx.impl.libsu.RootProcessMain {
     public static void main(java.lang.String[]);
 }
 
-# Strip out debugging stuffs
--assumenosideeffects class be.mygod.librootkotlinx.AppProcess {
-	boolean hasStartupAgents*(android.content.Context) return false;
-}
--assumenosideeffects class android.os.Debug {
-	public static boolean isDebuggerConnected() return false;
+# PendingRootServiceBind reflects libsu's queued bind task to undo only our own failed startup task.
+-if class be.mygod.librootkotlinx.impl.libsu.PendingRootServiceBind
+-keepnames class com.topjohnwu.superuser.internal.RootServiceManager
+-if class be.mygod.librootkotlinx.impl.libsu.PendingRootServiceBind
+-keepclassmembernames class com.topjohnwu.superuser.internal.RootServiceManager {
+	private int flags;
+	private java.util.List pendingTasks;
 }
