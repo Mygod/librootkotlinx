@@ -3,7 +3,6 @@ package be.mygod.librootkotlinx.impl
 import android.content.Intent
 import android.os.IBinder
 import android.os.Parcelable
-import android.os.RemoteException
 import be.mygod.librootkotlinx.Logger
 import be.mygod.librootkotlinx.ParcelableThrowable
 import be.mygod.librootkotlinx.RootCommand
@@ -96,7 +95,8 @@ internal class RootCommandService : RootService() {
             } else {
                 RootCommandResponse.failure(ParcelableThrowable(throwable))
             })
-        } catch (e: RemoteException) {
+        } catch (e: Throwable) {
+            if (e is CancellationException && !currentCoroutineContext().isActive) throw e
             Logger.me.w("Failed to deliver root command failure #$id", e)
             try {
                 sendResponse(id, RootCommandResponse.failure(
@@ -105,7 +105,10 @@ internal class RootCommandService : RootService() {
                             "but its failure payload could not be delivered",
                     ),
                 ))
-            } catch (fallbackFailure: RemoteException) {
+            } catch (fallbackFailure: Throwable) {
+                if (fallbackFailure is CancellationException && !currentCoroutineContext().isActive) {
+                    throw fallbackFailure
+                }
                 Logger.me.w("Failed to deliver fallback root command failure #$id; stopping root service", fallbackFailure)
                 commandJobs.cancelAll()
                 serviceJob.cancel()

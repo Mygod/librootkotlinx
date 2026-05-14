@@ -92,15 +92,15 @@ internal class RootCommandCallbacks {
                 }
                 RootCommandCallbackAction.CancelRemote -> if (unregister(id, callback)) {
                     RootCommandResponseHandling.CancelRemote
-                } else {
-                    RootCommandResponseHandling.Done
-                }
+                } else RootCommandResponseHandling.Done
             }
         } catch (e: Throwable) {
-            unregister(id, callback)
+            val removed = unregister(id, callback)
             callback.close(e)
             Logger.me.w("Failed to handle root command response #$id", e)
-            RootCommandResponseHandling.Done
+            if (removed && callback is RootCommandCallback.Flow) {
+                RootCommandResponseHandling.CancelRemote
+            } else RootCommandResponseHandling.Done
         }
     }
 

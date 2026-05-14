@@ -33,8 +33,17 @@ class RootCommandServiceTest {
 
     @Test
     fun commandFailureResponseFallsBackWhenRichFailureCannotBeDelivered() = runTest {
+        assertFailureResponseFallsBack(RemoteException("rich failure too large"))
+    }
+
+    @Test
+    fun commandFailureResponseFallsBackWhenRichFailureCannotBeParceled() = runTest {
+        assertFailureResponseFallsBack(RuntimeException("rich failure cannot be parceled"))
+    }
+
+    private suspend fun assertFailureResponseFallsBack(firstFailure: Throwable) {
         val service = RootCommandService()
-        val callback = FailingFirstResponseCallback()
+        val callback = FailingFirstResponseCallback(firstFailure)
 
         service.binder().execute(7, RootCommandRequest(FailingCommand), callback)
         val response = callback.fallbackResponse.await()
@@ -44,7 +53,7 @@ class RootCommandServiceTest {
         assertEquals(RootCommandResponse.EX_THROWABLE, response.status)
     }
 
-    private class FailingFirstResponseCallback : IRootCommandCallback.Default() {
+    private class FailingFirstResponseCallback(private val firstFailure: Throwable) : IRootCommandCallback.Default() {
         val fallbackResponse = CompletableDeferred<RootCommandResponse>()
         var responseCalls = 0
         var responseId = -1L
@@ -52,7 +61,7 @@ class RootCommandServiceTest {
         override fun onResponse(id: Long, response: RootCommandResponse) {
             ++responseCalls
             responseId = id
-            if (responseCalls == 1) throw RemoteException("rich failure too large")
+            if (responseCalls == 1) throw firstFailure
             fallbackResponse.complete(response)
         }
 

@@ -44,7 +44,7 @@ class RootCommandCallbacksTest {
     }
 
     @Test
-    fun callbackFailureUnregistersCallback() {
+    fun flowCallbackFailureCancelsRemoteAndUnregistersCallback() {
         val callbacks = RootCommandCallbacks()
         val channel = Channel<Parcelable?>(capacity = 1)
         val registered = callbacks.register { RootCommandCallback.Flow(null, channel) }
@@ -54,7 +54,7 @@ class RootCommandCallbacksTest {
             RootCommandResponse.parcelableFailure(NonThrowableParcelable),
         )
 
-        assertEquals(RootCommandResponseHandling.Done, handling)
+        assertEquals(RootCommandResponseHandling.CancelRemote, handling)
         assertFalse(callbacks.unregister(registered.id, registered.callback))
     }
 
