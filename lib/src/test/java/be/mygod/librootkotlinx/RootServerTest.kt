@@ -123,12 +123,12 @@ class RootServerTest {
     }
 
     @Test
-    fun cleanupClosesQueuedConnectedService() = runTest {
+    fun cleanupClosesConnectionDeliveredService() = runTest {
         val server = RootServer()
         val service = RecordingRootCommandService()
-        assertTrue(server.events().trySend(
-            server.connectedEvent(service),
-        ).isSuccess)
+        val connection = rootServiceConnection()
+        connection.markConnected(connectedService(connection, service))
+        server.markPendingConnection(connection)
         server.setCloseCause(CancellationException("closing"))
 
         server.cleanup()
@@ -174,6 +174,20 @@ class RootServerTest {
         }
     }
 
+    private fun RootServer.markPendingConnection(connection: RootServiceConnection) {
+        RootServer::class.java.getDeclaredField("pendingConnection").apply {
+            isAccessible = true
+            set(this@markPendingConnection, connection)
+        }
+    }
+
+    private fun RootServiceConnection.markConnected(connected: RootServiceConnection.Connected) {
+        RootServiceConnection::class.java.getDeclaredField("connected").apply {
+            isAccessible = true
+            set(this@markConnected, connected)
+        }
+    }
+
     private fun RootServer.setCloseCause(cause: Throwable) {
         RootServer::class.java.getDeclaredField("closeCause").apply {
             isAccessible = true
@@ -199,15 +213,11 @@ class RootServerTest {
             it.get(this) as IBinder.DeathRecipient
         }
 
-    private fun RootServer.events(): Channel<Any> =
-        RootServer::class.java.getDeclaredField("events").let {
-            it.isAccessible = true
-            @Suppress("UNCHECKED_CAST")
-            it.get(this) as Channel<Any>
-        }
-
     private fun connectedService(service: IRootCommandService) =
-        RootServiceConnection.Connected(rootServiceConnection(), proxy(IBinder::class.java), service)
+        connectedService(rootServiceConnection(), service)
+
+    private fun connectedService(connection: RootServiceConnection, service: IRootCommandService) =
+        RootServiceConnection.Connected(connection, proxy(IBinder::class.java), service)
 
     private fun rootServiceConnection(): RootServiceConnection {
         val connection = unsafe.allocateInstance(RootServiceConnection::class.java) as RootServiceConnection
@@ -216,15 +226,6 @@ class RootServerTest {
             set(connection, proxy(IBinder.DeathRecipient::class.java))
         }
         return connection
-    }
-
-    private fun RootServer.connectedEvent(service: IRootCommandService): Any {
-        val eventClass = RootServer::class.java.declaredClasses.single { it.simpleName == "Event" }
-            .declaredClasses.single { it.simpleName == "Connected" }
-        return eventClass.declaredConstructors.single().let {
-            it.isAccessible = true
-            it.newInstance(connectedService(service))
-        }
     }
 
     private suspend fun RootServer.cleanup() = callSuspend("cleanup")

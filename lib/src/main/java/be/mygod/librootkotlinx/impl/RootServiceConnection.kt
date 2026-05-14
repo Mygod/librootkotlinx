@@ -17,6 +17,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.asExecutor
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Owns one app-side attempt to bind the libsu RootService and, when needed, start the detached root process.
@@ -37,16 +38,20 @@ internal class RootServiceConnection(
     private var clearPending = false
     private var rootProcess: RootProcessHandle? = null
     private var startupJob: Job? = null
+    @Volatile
+    private var connected: Connected? = null
 
     override fun onServiceConnected(name: ComponentName, binder: IBinder) {
         val remote = IRootCommandService.Stub.asInterface(binder)
         try {
             binder.linkToDeath(deathRecipient, 0)
         } catch (e: RemoteException) {
-            if (!onCloseRequested(e)) unbindNow("Root service unbind after dead binding failed")
+            onCloseRequested(e)
+            unbindNow("Root service unbind after dead binding failed")
             return
         }
         val connected = Connected(this, binder, remote)
+        this.connected = connected
         if (!onConnected(connected)) connected.closeFromCallback("after closed bind")
     }
 
@@ -105,16 +110,30 @@ internal class RootServiceConnection(
         clearPending = true
     }
 
-    fun cancelStartup(cause: CancellationException) {
+    suspend fun close(cause: CancellationException, accepted: Connected?) {
+        val delivered = connected
+        // Revoking root-process ownership exits the root process, so close the Binder service first.
+        accepted?.close("during cleanup")
+        if (delivered !== accepted) delivered?.close("during cleanup")
+        cancelStartup(cause)
+        joinStartup()
+        if (accepted == null && delivered == null) {
+            cleanupPending()
+            unbind("Failed to unbind root service connection during cleanup")
+        }
+        connected = null
+    }
+
+    private fun cancelStartup(cause: CancellationException) {
         startupJob?.cancel(cause)
         rootProcess?.close()
     }
 
-    suspend fun joinStartup() {
+    private suspend fun joinStartup() {
         startupJob?.join()
     }
 
-    suspend fun cleanupPending() {
+    private suspend fun cleanupPending() {
         if (!clearPending) return
         val pendingBind = pendingBind ?: return
         withContext(Dispatchers.Main.immediate) {
@@ -126,7 +145,7 @@ internal class RootServiceConnection(
         }
     }
 
-    suspend fun unbind(message: String) {
+    private suspend fun unbind(message: String) {
         withContext(Dispatchers.Main.immediate) {
             unbindNow(message)
         }
@@ -145,7 +164,10 @@ internal class RootServiceConnection(
         internal val binder: IBinder,
         val service: IRootCommandService,
     ) {
+        private val closed = AtomicBoolean()
+
         suspend fun close(reason: String) {
+            if (!closed.compareAndSet(false, true)) return
             try {
                 binder.unlinkToDeath(connection.deathRecipient, 0)
             } catch (e: RuntimeException) {
@@ -157,9 +179,11 @@ internal class RootServiceConnection(
                 Logger.me.w("Failed to close root service $reason", e)
             }
             connection.unbind("Failed to unbind root service connection $reason")
+            if (connection.connected === this) connection.connected = null
         }
 
         fun closeFromCallback(reason: String) {
+            if (!closed.compareAndSet(false, true)) return
             try {
                 binder.unlinkToDeath(connection.deathRecipient, 0)
             } catch (e: RuntimeException) {
@@ -171,6 +195,7 @@ internal class RootServiceConnection(
                 Logger.me.w("Failed to close root service $reason", e)
             }
             connection.unbindNow("Failed to unbind root service connection $reason")
+            if (connection.connected === this) connection.connected = null
         }
     }
 }

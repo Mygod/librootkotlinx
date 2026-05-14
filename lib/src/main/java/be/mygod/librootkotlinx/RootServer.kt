@@ -334,7 +334,6 @@ class RootServer internal constructor() {
         val cause = closeCause ?: CancellationException("Root server closed")
         val connected = connected
         val pendingConnection = pendingConnection
-        var pendingUnbind = pendingConnection
         recordCloseCause(cause)
         rootServiceConnected.cancel(cause.asCancellationException())
         events.close(cause)
@@ -348,23 +347,15 @@ class RootServer internal constructor() {
             else started.completeExceptionally(cause)
         }
         val connection = connected?.connection ?: pendingConnection
-        connection?.cancelStartup(cause.asCancellationException())
         withContext(NonCancellable) {
             queuedEvents.forEach { event ->
                 when (event) {
-                    is Event.Connected -> {
-                        if (pendingUnbind === event.service.connection) pendingUnbind = null
-                        event.service.close("after closed bind")
-                    }
                     is Event.SendCommand -> event.result.completeExceptionally(cause)
                     else -> Unit
                 }
             }
-            connection?.joinStartup()
-            if (connected == null) pendingConnection?.cleanupPending()
             commandCallbacks.closeAll(cause)
-            if (connected == null) pendingUnbind?.unbind("Root service unbind failed")
-            else connected.close("during cleanup")
+            connection?.close(cause.asCancellationException(), connected)
             this@RootServer.connected = null
             this@RootServer.pendingConnection = null
         }
