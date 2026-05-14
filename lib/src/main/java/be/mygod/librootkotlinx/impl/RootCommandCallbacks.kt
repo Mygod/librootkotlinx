@@ -67,7 +67,7 @@ internal enum class RootCommandResponseHandling {
 }
 
 internal class RootCommandCallbacks {
-    private val callbacks = MutableLongObjectMap<RootCommandCallback>()
+    private var callbacks = MutableLongObjectMap<RootCommandCallback>()
     private var counter = 0L
 
     fun register(factory: (Long) -> RootCommandCallback): RegisteredRootCommandCallback = synchronized(this) {
@@ -105,11 +105,7 @@ internal class RootCommandCallbacks {
     }
 
     fun closeAll(cause: Throwable) {
-        val pending = ArrayList<RootCommandCallback>()
-        synchronized(this) {
-            callbacks.forEachValue { pending.add(it) }
-            callbacks.clear()
-        }
-        pending.forEach { it.close(cause) }
+        val closing = synchronized(this) { callbacks.also { callbacks = MutableLongObjectMap() } }
+        closing.forEachValue { it.close(cause) }
     }
 }

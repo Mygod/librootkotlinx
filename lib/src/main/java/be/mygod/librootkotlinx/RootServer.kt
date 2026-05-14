@@ -337,19 +337,14 @@ class RootServer internal constructor() {
         recordCloseCause(cause)
         rootServiceConnected.cancel(cause.asCancellationException())
         events.close(cause)
-        val queuedEvents = ArrayList<Event>()
-        while (true) {
-            val event = events.tryReceive().getOrNull() ?: break
-            queuedEvents.add(event)
-        }
         if (!started.isCompleted) {
             if (cause is CancellationException) started.cancel(cause)
             else started.completeExceptionally(cause)
         }
         val connection = connected?.connection ?: pendingConnection
         withContext(NonCancellable) {
-            queuedEvents.forEach { event ->
-                when (event) {
+            while (true) {
+                when (val event = events.tryReceive().getOrNull() ?: break) {
                     is Event.SendCommand -> event.result.completeExceptionally(cause)
                     else -> Unit
                 }
