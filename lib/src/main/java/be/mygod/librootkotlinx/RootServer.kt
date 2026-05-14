@@ -22,7 +22,6 @@ import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.SendChannel
 import kotlinx.coroutines.channels.awaitClose
@@ -42,8 +41,7 @@ class RootServer internal constructor() {
     private var lifecycleStarted = false
     private val serverJob = Job()
     private val serverScope = CoroutineScope(Dispatchers.Default + serverJob)
-    // Command submissions and lifecycle callbacks are serialized here. Root responses bypass this queue so Flow
-    // backpressure stays caller-bounded.
+    // Command submissions and lifecycle callbacks are serialized here. Root responses bypass this queue.
     private val events = Channel<Event>(Channel.UNLIMITED)
     private val started = CompletableDeferred<Unit>()
     private val rootServiceConnected = Job()
@@ -149,32 +147,23 @@ class RootServer internal constructor() {
      * Creates a cold [Flow] backed by [source] in the root service.
      *
      * Each collection registers a new remote command and starts one root-side [RootFlow.flow] collection. Cancelling the
-     * client collector unregisters that command and asks the root service to cancel its job. [capacity] and
-     * [onBufferOverflow] configure the local response buffer. If the buffer rejects a root response, the remote command is
-     * cancelled and the client flow fails. Once command submission is accepted, collector cancellation is best-effort
-     * remote cancellation rather than a guarantee that the root flow has not started.
+     * client collector unregisters that command and asks the root service to cancel its job. Root responses are delivered
+     * through one-way Binder callbacks, so app-side Flow operators do not backpressure root-side emission. Once command
+     * submission is accepted, collector cancellation is best-effort remote cancellation rather than a guarantee that the
+     * root flow has not started.
      */
-    inline fun <T : Parcelable?, reified C : RootFlow<T>> flow(
-        source: C,
-        capacity: Int = Channel.UNLIMITED,
-        onBufferOverflow: BufferOverflow = BufferOverflow.SUSPEND,
-    ) = flow(source, C::class.java.classLoader, capacity, onBufferOverflow)
+    inline fun <T : Parcelable?, reified C : RootFlow<T>> flow(source: C) = flow(source, C::class.java.classLoader)
 
     /**
      * Creates a cold [Flow] backed by [source] in the root service.
      *
      * Each collection registers a new remote command and starts one root-side [RootFlow.flow] collection. Cancelling the
-     * client collector unregisters that command and asks the root service to cancel its job. [capacity] and
-     * [onBufferOverflow] configure the local response buffer. If the buffer rejects a root response, the remote command is
-     * cancelled and the client flow fails. Once command submission is accepted, collector cancellation is best-effort
-     * remote cancellation rather than a guarantee that the root flow has not started.
+     * client collector unregisters that command and asks the root service to cancel its job. Root responses are delivered
+     * through one-way Binder callbacks, so app-side Flow operators do not backpressure root-side emission. Once command
+     * submission is accepted, collector cancellation is best-effort remote cancellation rather than a guarantee that the
+     * root flow has not started.
      */
-    fun <T : Parcelable?> flow(
-        source: RootFlow<T>,
-        classLoader: ClassLoader?,
-        capacity: Int = Channel.UNLIMITED,
-        onBufferOverflow: BufferOverflow = BufferOverflow.SUSPEND,
-    ): Flow<T> = callbackFlow<T> {
+    fun <T : Parcelable?> flow(source: RootFlow<T>, classLoader: ClassLoader?): Flow<T> = callbackFlow<T> {
         @Suppress("UNCHECKED_CAST")
         val channel = this as SendChannel<Parcelable?>
         val registered = this@RootServer.send(source) {
@@ -185,7 +174,7 @@ class RootServer internal constructor() {
         } finally {
             cancelRemote(registered.id, registered.callback)
         }
-    }.buffer(capacity, onBufferOverflow)
+    }.buffer(Channel.UNLIMITED)
 
     /**
      * Close the instance gracefully.

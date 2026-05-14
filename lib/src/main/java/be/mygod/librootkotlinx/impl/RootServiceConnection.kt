@@ -35,7 +35,8 @@ internal class RootServiceConnection(
     private val packageCodePath = context.packageCodePath
     private val intent = Intent(context, RootCommandService::class.java)
     private var pendingBind: PendingRootServiceBind? = null
-    private var clearPending = false
+    private var cleanupPendingBind = false
+    private var clearPendingEnRoute = false
     private var rootProcess: RootProcessHandle? = null
     private var startupJob: Job? = null
     @Volatile
@@ -75,16 +76,18 @@ internal class RootServiceConnection(
                     intent,
                     Dispatchers.Main.immediate.asExecutor(),
                     this@RootServiceConnection,
-                ).also {
-                    if (it != null && pendingBind.ownsStartupIfQueued) {
-                        pendingBind.captureQueuedTask()
-                        clearPending = true
+                ).also { task ->
+                    cleanupPendingBind = pendingBind.captureQueuedTask()
+                    if (task != null && pendingBind.ownsStartupIfQueued) {
+                        cleanupPendingBind = true
+                        clearPendingEnRoute = true
                     }
                 }
             } catch (e: Throwable) {
+                cleanupPendingBind = pendingBind.captureQueuedTask()
                 if (pendingBind.ownsStartupIfQueued) {
-                    pendingBind.captureQueuedTask()
-                    clearPending = true
+                    cleanupPendingBind = true
+                    clearPendingEnRoute = true
                 }
                 throw e
             }
@@ -92,7 +95,10 @@ internal class RootServiceConnection(
                 try {
                     RootProcessHandle(packageCodePath, task, handleRootIo)
                 } catch (e: Throwable) {
-                    if (pendingBind.ownsStartupIfQueued) clearPending = true
+                    if (pendingBind.ownsStartupIfQueued) {
+                        cleanupPendingBind = true
+                        clearPendingEnRoute = true
+                    }
                     throw e
                 }.also { this@RootServiceConnection.rootProcess = it }
             } else null
@@ -107,7 +113,8 @@ internal class RootServiceConnection(
     }
 
     fun markStartupFailed() {
-        clearPending = true
+        cleanupPendingBind = true
+        clearPendingEnRoute = true
     }
 
     suspend fun close(cause: CancellationException, accepted: Connected?) {
@@ -134,11 +141,11 @@ internal class RootServiceConnection(
     }
 
     private suspend fun cleanupPending() {
-        if (!clearPending) return
+        if (!cleanupPendingBind && !clearPendingEnRoute) return
         val pendingBind = pendingBind ?: return
         withContext(Dispatchers.Main.immediate) {
             try {
-                pendingBind.cancel()
+                pendingBind.cancel(clearPendingEnRoute)
             } catch (e: Throwable) {
                 Logger.me.w("Failed to clean up libsu pending RootService bind", e)
             }
