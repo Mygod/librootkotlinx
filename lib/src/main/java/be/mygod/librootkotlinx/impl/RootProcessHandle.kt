@@ -7,10 +7,12 @@ import com.topjohnwu.superuser.Shell
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
@@ -36,21 +38,14 @@ internal class RootProcessHandle(
             val ownershipAccepted = async { ownership.accept() }
             select {
                 ownershipAccepted.onAwait { }
-                handlerCompletion.onAwait { throw RootIoExitException(it) }
+                handlerCompletion.onAwait {
+                    currentCoroutineContext().ensureActive()
+                    throw RootIoExitException(it)
+                }
             }
             pipes.closeRemaining()
 
-            var handlerCompleted = false
-            var handlerFailure: Throwable? = null
-            select {
-                rootServiceConnected.onJoin { }
-                handlerCompletion.onAwait {
-                    handlerCompleted = true
-                    handlerFailure = it
-                }
-            }
-            if (handlerCompleted && !rootServiceConnected.isCompleted) throw RootIoExitException(handlerFailure)
-            handlerCompletion.await()
+            awaitRootServiceConnected(rootServiceConnected, handlerCompletion)
         } finally {
             pipes.closeRemaining()
         }
@@ -81,9 +76,35 @@ internal class RootProcessHandle(
             }
         }.invokeOnCompletion {
             handlerStdio.close()
-            handlerCompletion.complete(it)
+            if (it is CancellationException) {
+                handlerCompletion.cancel(it)
+            } else {
+                handlerCompletion.complete(it)
+            }
         }
         return handlerCompletion
+    }
+
+    internal companion object {
+        suspend fun awaitRootServiceConnected(
+            rootServiceConnected: Job,
+            handlerCompletion: Deferred<Throwable?>,
+        ) {
+            var handlerCompleted = false
+            var handlerFailure: Throwable? = null
+            select {
+                rootServiceConnected.onJoin { }
+                handlerCompletion.onAwait {
+                    handlerCompleted = true
+                    handlerFailure = it
+                }
+            }
+            if (handlerCompleted && !rootServiceConnected.isCompleted) {
+                currentCoroutineContext().ensureActive()
+                throw RootIoExitException(handlerFailure)
+            }
+            handlerCompletion.await()
+        }
     }
 
     private class RootIoExitException(cause: Throwable?) :
