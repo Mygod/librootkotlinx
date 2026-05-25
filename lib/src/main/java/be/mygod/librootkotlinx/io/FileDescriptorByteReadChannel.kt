@@ -7,6 +7,7 @@ import android.annotation.SuppressLint
 import android.os.Handler
 import android.os.MessageQueue
 import android.os.ParcelFileDescriptor
+import android.os.StrictMode
 import android.system.ErrnoException
 import android.system.Os
 import android.system.OsConstants
@@ -90,7 +91,13 @@ internal abstract class FileDescriptorByteReadChannelImpl(
     private suspend fun drainAvailable(): Boolean = drainLock.withLock {
         while (!channel.isClosedForWrite) {
             val count = try {
-                Os.read(fileDescriptor, buffer, 0, buffer.size)
+                // BlockGuardOs reports all Os.read calls as disk reads; this fd is nonblocking.
+                val policy = StrictMode.allowThreadDiskReads()
+                try {
+                    Os.read(fileDescriptor, buffer, 0, buffer.size)
+                } finally {
+                    StrictMode.setThreadPolicy(policy)
+                }
             } catch (e: ErrnoException) {
                 when (e.errno) {
                     OsConstants.EAGAIN -> return true

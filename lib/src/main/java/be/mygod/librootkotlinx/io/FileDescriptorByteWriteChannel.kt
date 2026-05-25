@@ -6,6 +6,7 @@ package be.mygod.librootkotlinx.io
 import android.os.Handler
 import android.os.MessageQueue
 import android.os.ParcelFileDescriptor
+import android.os.StrictMode
 import android.system.ErrnoException
 import android.system.Os
 import android.system.OsConstants
@@ -45,7 +46,13 @@ internal abstract class FileDescriptorWriteChannel(
                     var offset = 0
                     while (offset < count) {
                         val written = try {
-                            Os.write(fileDescriptor, buffer, offset, count - offset)
+                            // BlockGuardOs reports all Os.write calls as disk writes; this fd is nonblocking.
+                            val policy = StrictMode.allowThreadDiskWrites()
+                            try {
+                                Os.write(fileDescriptor, buffer, offset, count - offset)
+                            } finally {
+                                StrictMode.setThreadPolicy(policy)
+                            }
                         } catch (e: ErrnoException) {
                             when (e.errno) {
                                 OsConstants.EAGAIN -> {

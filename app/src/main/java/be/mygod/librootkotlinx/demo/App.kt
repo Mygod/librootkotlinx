@@ -1,6 +1,7 @@
 package be.mygod.librootkotlinx.demo
 
 import android.app.Application
+import android.os.StrictMode
 import android.util.Log
 import be.mygod.librootkotlinx.Logger
 import be.mygod.librootkotlinx.RootServer
@@ -17,6 +18,8 @@ class App : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        StrictMode.setThreadPolicy(StrictMode.ThreadPolicy.Builder().detectAll().penaltyDeath().build())
+        StrictMode.setVmPolicy(StrictMode.VmPolicy.Builder().detectAll().penaltyDeath().build())
         // simply initialize a global instance, this is a very lightweight operation
         rootManager = object : RootSession() {
             override val context get() = this@App

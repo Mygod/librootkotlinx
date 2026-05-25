@@ -1,7 +1,9 @@
 package be.mygod.librootkotlinx.net
 
 import android.net.LocalServerSocket
+import android.os.Build
 import android.os.Handler
+import android.os.StrictMode
 import android.system.ErrnoException
 import android.system.OsConstants
 import be.mygod.librootkotlinx.io.FileDescriptorEventAwaiter
@@ -26,7 +28,19 @@ class ALocalServerSocket(val socket: LocalServerSocket, private val handler: Han
         while (true) {
             eventAwaiter.await(input = true)
             try {
-                return@withContext ALocalSocket(socket.accept(), handler)
+                // API 31's BlockGuardOs skips StrictMode network policy for nonblocking AF_UNIX accept.
+                val accepted = if (Build.VERSION.SDK_INT < 31) {
+                    val policy = StrictMode.getThreadPolicy()
+                    try {
+                        StrictMode.setThreadPolicy(StrictMode.ThreadPolicy.Builder(policy).permitNetwork().build())
+                        socket.accept()
+                    } finally {
+                        StrictMode.setThreadPolicy(policy)
+                    }
+                } else {
+                    socket.accept()
+                }
+                return@withContext ALocalSocket(accepted, handler)
             } catch (e: IOException) {
                 if ((e.cause as? ErrnoException)?.errno != OsConstants.EAGAIN) throw e
             }
