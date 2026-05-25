@@ -37,9 +37,7 @@ class ALocalServerSocket(val socket: LocalServerSocket, private val handler: Han
                     } finally {
                         StrictMode.setThreadPolicy(policy)
                     }
-                } else {
-                    socket.accept()
-                }
+                } else socket.accept()
                 return@withContext ALocalSocket(accepted, handler)
             } catch (e: IOException) {
                 if ((e.cause as? ErrnoException)?.errno != OsConstants.EAGAIN) throw e
