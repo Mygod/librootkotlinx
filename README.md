@@ -1,6 +1,5 @@
 # librootkotlinx
 
-[![CI](https://github.com/Mygod/librootkotlinx/actions/workflows/ci.yml/badge.svg)](https://github.com/Mygod/librootkotlinx/actions/workflows/ci.yml)
 [![Android 6-16.1](https://img.shields.io/badge/Android-6--16.1-3DDC84?logo=android&logoColor=white)](lib/build.gradle.kts)
 
 Run rooted Kotlin JVM code made super easy with coroutines and parcelize!
