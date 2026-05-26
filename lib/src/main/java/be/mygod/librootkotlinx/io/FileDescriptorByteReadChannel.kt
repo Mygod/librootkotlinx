@@ -4,6 +4,7 @@
 package be.mygod.librootkotlinx.io
 
 import android.annotation.SuppressLint
+import android.os.Build
 import android.os.Handler
 import android.os.MessageQueue
 import android.os.ParcelFileDescriptor
@@ -188,17 +189,37 @@ fun FileDescriptor.openReadChannel(
     }
 }
 
+private val setBlocking by lazy {
+    Class.forName("libcore.io.IoUtils").getMethod("setBlocking", FileDescriptor::class.java,
+        Boolean::class.javaPrimitiveType)
+}
+/**
+ * Caller beware: the getter is mainly for diagnostic purposes.
+ * Calling it requires private API bypassing only on API 28-29.
+ */
 var FileDescriptor.isNonblocking: Boolean
     @SuppressLint("NewApi")
     get() = Os.fcntlInt(this, OsConstants.F_GETFL, 0) and OsConstants.O_NONBLOCK != 0
     @SuppressLint("NewApi")
     set(value) {
-        val flags = Os.fcntlInt(this, OsConstants.F_GETFL, 0)
-        Os.fcntlInt(this, OsConstants.F_SETFL, if (value) {
-            flags or OsConstants.O_NONBLOCK
-        } else {
-            flags and OsConstants.O_NONBLOCK.inv()
-        })
+        var setBlockingFailure: ReflectiveOperationException? = null
+        if (Build.VERSION.SDK_INT < 30) {
+            try {
+                setBlocking(null, this, !value)
+                return
+            } catch (e: ReflectiveOperationException) {
+                setBlockingFailure = e
+            }
+        }
+        try {
+            val flags = Os.fcntlInt(this, OsConstants.F_GETFL, 0)
+            Os.fcntlInt(this, OsConstants.F_SETFL, if (value) {
+                flags or OsConstants.O_NONBLOCK
+            } else flags and OsConstants.O_NONBLOCK.inv())
+        } catch (e: Throwable) {
+            if (setBlockingFailure != null) e.addSuppressed(setBlockingFailure)
+            throw e
+        }
     }
 
 suspend fun ByteReadChannel.useLines(block: (String) -> Unit) {
