@@ -1,6 +1,8 @@
 # librootkotlinx
 
 [![Android 6-16.1](https://img.shields.io/badge/Android-6--16.1-3DDC84?logo=android&logoColor=white)](lib/build.gradle.kts)
+[![Commercial users](https://api.scarf.sh/v2/packages/Mygod/c30a76a0-1b1f-4605-a6ff-38c5198e574c/commercial-users-badge)](https://scarf.sh/packages/Mygod/c30a76a0-1b1f-4605-a6ff-38c5198e574c)
+[![Downloads](https://api.scarf.sh/v2/packages/Mygod/c30a76a0-1b1f-4605-a6ff-38c5198e574c/downloads-badge)](https://scarf.sh/packages/Mygod/c30a76a0-1b1f-4605-a6ff-38c5198e574c)
 
 Run rooted Kotlin JVM code made super easy with coroutines and parcelize!
 Check out demo at `app` to see just how easy it is.
