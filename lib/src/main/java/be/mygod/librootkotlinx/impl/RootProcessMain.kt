@@ -47,7 +47,7 @@ internal object RootProcessMain {
                     ?: throw IllegalStateException("${RootServiceHandoff.AUTHORITY_ENV} is not set")
                 val token = System.getenv(RootServiceHandoff.TOKEN_ENV)
                     ?: throw IllegalStateException("${RootServiceHandoff.TOKEN_ENV} is not set")
-                val service = RootCommandService(context)
+                val service = RootCommandService(context, Looper.myLooper()!!::quitSafely)
                 if (!RootServiceHandoffClient.handoff(context, authority, token, service.asBinder(), targetUid)) {
                     throw IllegalStateException("Root service handoff rejected")
                 }

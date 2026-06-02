@@ -107,6 +107,7 @@ internal class RootServiceConnection(
 
     fun markStartupFailed() {
         handoff?.close()
+        handoff = null
     }
 
     suspend fun close(cause: CancellationException, accepted: Connected?) {

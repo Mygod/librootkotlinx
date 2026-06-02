@@ -64,8 +64,6 @@ Greylisted/blacklisted APIs or internal constants: (some constants are hardcoded
 * (API 24+) `Landroid/content/res/Resources;->setImpl(Landroid/content/res/ResourcesImpl;)V,unsupported`
 * (API 23) `Landroid/os/UserHandle;-><init>(I)V,unsupported`
 * (API 26+) `Lcom/android/internal/os/ZygoteInit;->createPathClassLoader(Ljava/lang/String;I)Ljava/lang/ClassLoader;,blocked`
-* (API 29+) `Ldalvik/system/VMRuntime;->getCurrentInstructionSet()Ljava/lang/String;,core-platform-api,unsupported`
-* (API 29+) `Ldalvik/system/VMRuntime;->getRuntime()Ldalvik/system/VMRuntime;,core-platform-api,unsupported`
 * `Llibcore/io/IoUtils;->setBlocking(Ljava/io/FileDescriptor;Z)V,core-platform-api,unsupported`
 
 <details>
@@ -74,8 +72,6 @@ Greylisted/blacklisted APIs or internal constants: (some constants are hardcoded
 * `Landroid/app/ContextImpl;->createPackageContextAsUser(Ljava/lang/String;ILandroid/os/UserHandle;)Landroid/content/Context;,sdk,system-api,test-api`
 * (API 31+) `Landroid/content/AttributionSource;->myAttributionSource()Landroid/content/AttributionSource;,public-api,sdk,system-api,test-api`
 * `Landroid/content/Context;->createPackageContextAsUser(Ljava/lang/String;ILandroid/os/UserHandle;)Landroid/content/Context;,sdk,system-api,test-api`
-* (API 29+) `Landroid/os/SystemProperties;->get(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;,sdk,system-api,test-api`
-* (API 29+) `Landroid/os/SystemProperties;->getBoolean(Ljava/lang/String;Z)Z,sdk,system-api,test-api`
 * (API 24+) `Landroid/os/UserHandle;->of(I)Landroid/os/UserHandle;,sdk,system-api,test-api`
 
 </details>
@@ -117,14 +113,9 @@ Other:
   while replacing libsu's root-main jar, `RootServerMain`, and broadcast handoff with the direct app APK classpath
   shape from [librootkotlinx v1 `AppProcess.launchString`](https://github.com/Mygod/librootkotlinx/blob/06701fd7d6f2fc115ee90cb47ee7105d94a6ddd3/lib/src/main/java/be/mygod/librootkotlinx/AppProcess.kt#L119-L136).
 * `app_process` relocation follows
-  [librootkotlinx v1 `AppProcess.relocateScript`](https://github.com/Mygod/librootkotlinx/blob/06701fd7d6f2fc115ee90cb47ee7105d94a6ddd3/lib/src/main/java/be/mygod/librootkotlinx/AppProcess.kt#L82-L117),
-  Android 10's [`/apex/<name>/etc/ld.config.txt` lookup](https://android.googlesource.com/platform/bionic/+/android-10.0.0_r1/linker/linker.cpp#4062),
-  Android 11's [`/linkerconfig/ld.config.txt` fallback](https://android.googlesource.com/platform/bionic/+/android-11.0.0_r1/linker/linker.cpp#3412),
-  and the Android 8 [`linker_config.cpp` section parser](https://android.googlesource.com/platform/bionic/+/android-8.0.0_r1/linker/linker_config.cpp#194).
-* Linker fallback reflects
-  [`VMRuntime.getCurrentInstructionSet()`](https://android.googlesource.com/platform/libcore/+/android-5.0.0_r1/libart/src/main/java/dalvik/system/VMRuntime.java#350),
-  [`SystemProperties.get(...)`](https://android.googlesource.com/platform/frameworks/base/+/android-5.0.0_r1/core/java/android/os/SystemProperties.java#60),
-  and [`SystemProperties.getBoolean(...)`](https://android.googlesource.com/platform/frameworks/base/+/android-5.0.0_r1/core/java/android/os/SystemProperties.java#110).
+  [librootkotlinx v1 `AppProcess.relocateScript`](https://github.com/Mygod/librootkotlinx/blob/06701fd7d6f2fc115ee90cb47ee7105d94a6ddd3/lib/src/main/java/be/mygod/librootkotlinx/AppProcess.kt#L82-L117)
+  for API 23-25 only. The owned backend deliberately drops v1's API 29+ APEX/linker-config relocation branch because
+  modern Android app_process is not expected to live under `/data`.
 * Code and native library path construction follows
   [`LoadedApk.makePaths(...)`](https://android.googlesource.com/platform/frameworks/base/+/android-7.0.0_r1/core/java/android/app/LoadedApk.java#316),
   including `sourceDir`, `splitSourceDirs`, `nativeLibraryDir`, and APK `!/lib/<abi>` paths.
@@ -144,5 +135,4 @@ The following Android system binaries or shell commands are assumed to be bundle
 * `/proc/<pid>/fd/<n>` paths for app-owned stdin/stdout/stderr and startup-marker pipe redirection;
 * `/proc/self/exe` and `/proc/<pid>/exe` for `app_process` discovery/copying;
 * `/system/bin/app_process` as the fallback root `app_process` executable;
-* `/system/etc/ld.config.*.txt` or `/linkerconfig/ld.config.txt` for API 29+ relocation;
-* `mkdir`, `mount`, `cp`, `chmod`, `cat`, `printf`, and shell `exec`.
+* `mkdir`, `cp`, `chmod`, `printf`, and shell `exec`.

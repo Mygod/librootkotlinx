@@ -1,6 +1,7 @@
 package be.mygod.librootkotlinx.impl
 
 import android.os.IBinder
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -33,6 +34,38 @@ class RootServiceHandoffTest {
         } finally {
             registration.close()
         }
+    }
+
+    @Test
+    fun deliverConsumesTokenWhenCallbackRejectsBinder() {
+        val binder = proxy(IBinder::class.java)
+        val registration = RootServiceHandoff.register { false }
+
+        assertFalse(RootServiceHandoff.deliver(registration.token, binder))
+        assertFalse(RootServiceHandoff.deliver(registration.token, binder))
+    }
+
+    @Test
+    fun closedRegistrationRejectsDelivery() {
+        val binder = proxy(IBinder::class.java)
+        var delivered = false
+        val registration = RootServiceHandoff.register {
+            delivered = true
+            true
+        }
+
+        registration.close()
+
+        assertFalse(RootServiceHandoff.deliver(registration.token, binder))
+        assertFalse(delivered)
+    }
+
+    @Test
+    fun providerRejectsInvalidHandoffWithoutThrowing() {
+        val result = RootServiceHandoffProvider().call(RootServiceHandoff.METHOD, null, null)
+
+        assertNotNull(result)
+        assertFalse(result!!.getBoolean(RootServiceHandoff.EXTRA_ACCEPTED, true))
     }
 
     private companion object {

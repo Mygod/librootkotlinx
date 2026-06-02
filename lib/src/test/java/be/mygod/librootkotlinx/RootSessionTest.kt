@@ -178,6 +178,23 @@ class RootSessionTest {
     }
 
     @Test
+    fun ownedShellFailurePropagatesFromAcquire() = runTest {
+        val failure = NoShellException("Root shell is not available")
+        val session = object : TestRootSession() {
+            override suspend fun initServer(server: RootServer) {
+                throw failure
+            }
+        }
+
+        try {
+            session.acquire()
+            fail("Expected owned shell failure")
+        } catch (e: NoShellException) {
+            assertSame(failure, e)
+        }
+    }
+
+    @Test
     fun failedStartupAcquirePropagatesFailureToWaitingAcquire() = runTest {
         val initStarted = CompletableDeferred<Unit>()
         val failStartup = CompletableDeferred<Unit>()

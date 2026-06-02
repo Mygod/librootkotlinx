@@ -1,7 +1,6 @@
 package be.mygod.librootkotlinx.impl
 
 import android.content.Context
-import android.content.Intent
 import android.os.IBinder
 import android.os.Parcelable
 import be.mygod.librootkotlinx.Logger
@@ -21,7 +20,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-internal class RootCommandService(context: Context? = null) {
+internal class RootCommandService(context: Context? = null, private val stopRootProcess: () -> Unit = {}) {
     private val serviceJob = SupervisorJob()
     private val commandScope = CoroutineScope(Dispatchers.Main.immediate + serviceJob)
     private val callbackDispatcher = Dispatchers.Default.limitedParallelism(1)
@@ -108,6 +107,7 @@ internal class RootCommandService(context: Context? = null) {
                 Logger.me.w("Failed to deliver fallback root command failure #$id; stopping root service", fallbackFailure)
                 commandJobs.cancelAll()
                 serviceJob.cancel()
+                stopRootProcess()
             }
         }
     }

@@ -1,6 +1,7 @@
 package be.mygod.librootkotlinx.impl
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -53,26 +54,15 @@ class RootProcessLauncherTest {
     }
 
     @Test
-    fun findLinkerSectionUsesFirstMatchingDirectoryBeforeNextSection() {
-        val section = RootProcessAppProcess.findLinkerSection(sequenceOf(
-            "# comment",
-            "dir.system = /system/bin",
-            "dir.vendor = /vendor/bin",
-            "[vendor]",
-            "dir.late = /system/bin/app_process64",
-        ), "/system/bin/app_process64")
+    fun relocationScriptCopiesAppProcessToDev() {
+        val (script, relocated) = RootProcessAppProcess.relocateScript("token")
 
-        assertEquals("system", section)
-    }
-
-    @Test
-    fun findLinkerSectionRejectsMissingMatch() {
-        try {
-            RootProcessAppProcess.findLinkerSection(sequenceOf("dir.vendor = /vendor/bin"), "/system/bin/app_process64")
-        } catch (e: IllegalArgumentException) {
-            assertTrue(e.message.orEmpty().contains("No valid linker section found"))
-            return
-        }
-        throw AssertionError("Expected missing linker section to be rejected")
+        assertEquals("/dev/app_process_token", relocated)
+        assertEquals(
+            "[ -f '/dev/app_process_token' ] || { mkdir -p '/dev' && " +
+                    "cp ${RootProcessAppProcess.myExe} '/dev/app_process_token' && " +
+                    "chmod 700 '/dev/app_process_token'; } || exit 1\n",
+            script.toString(),
+        )
     }
 }

@@ -1,5 +1,6 @@
 package be.mygod.librootkotlinx.impl
 
+import android.os.Build
 import be.mygod.librootkotlinx.NoShellException
 import io.ktor.utils.io.readLine
 import kotlinx.coroutines.Dispatchers
@@ -32,6 +33,7 @@ internal class RootProcessLauncher(
     suspend fun launch(pipes: RootProcessPipes) {
         val startupNonce = UUID.randomUUID().toString()
         runInterruptible(Dispatchers.IO) {
+            val shouldRelocate = Build.VERSION.SDK_INT < 26
             executeRootShell(buildStartupCommand(
                 packageName = packageName,
                 packageCodePath = packageCodePath,
@@ -43,8 +45,8 @@ internal class RootProcessLauncher(
                 handoffAuthority = handoffAuthority,
                 handoffToken = handoffToken,
                 appProcess = RootProcessAppProcess.myExe,
-                shouldRelocate = RootProcessAppProcess.shouldRelocateHeuristics,
-                relocationToken = relocationToken(),
+                shouldRelocate = shouldRelocate,
+                relocationToken = if (shouldRelocate) relocationToken() else "",
             ))
         }
         pipes.closeMarkerWrite()
