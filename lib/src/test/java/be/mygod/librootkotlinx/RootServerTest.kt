@@ -123,6 +123,29 @@ class RootServerTest {
     }
 
     @Test
+    fun closeAfterFailureDoesNotLogClientShutdown() = runTest {
+        val logger = RecordingLogger()
+        val previousLogger = Logger.me
+        Logger.me = logger
+        try {
+            val server = RootServer()
+            server.markConnected(RecordingRootCommandService())
+
+            server.deathRecipient().binderDied()
+            server.close()
+
+            assertTrue(logger.warnings.toString(), logger.warnings.any {
+                it.first?.startsWith("Root server closing due to failure: ") == true &&
+                        it.first?.contains("Root service exited unexpectedly") == true
+            })
+            assertTrue(logger.warnings.any { it.first == "Root server close cause" && it.second is RootServer.UnexpectedExitException })
+            assertFalse(logger.debugs.contains("Shutting down from client"))
+        } finally {
+            Logger.me = previousLogger
+        }
+    }
+
+    @Test
     fun cleanupClosesConnectionDeliveredService() = runTest {
         val server = RootServer()
         val service = RecordingRootCommandService()
@@ -159,6 +182,19 @@ class RootServerTest {
         }
 
         override fun asBinder(): IBinder = proxy(IBinder::class.java)
+    }
+
+    private class RecordingLogger : Logger {
+        val debugs = mutableListOf<String?>()
+        val warnings = mutableListOf<Pair<String?, Throwable?>>()
+
+        override fun d(m: String?, t: Throwable?) {
+            debugs += m
+        }
+
+        override fun w(m: String?, t: Throwable?) {
+            warnings += m to t
+        }
     }
 
     private object NoOpOneWayCommand : RootCommandOneWay {

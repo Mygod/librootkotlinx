@@ -2,8 +2,6 @@ package be.mygod.librootkotlinx.impl
 
 import android.os.ParcelFileDescriptor
 import be.mygod.librootkotlinx.Logger
-import be.mygod.librootkotlinx.impl.libsu.RootProcessLauncher
-import com.topjohnwu.superuser.Shell
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -17,18 +15,31 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
 import java.io.Closeable
+import java.io.File
 import java.io.IOException
 
 /**
- * Owns the non-libsu side of one detached root process: startup stdio, ownership rendezvous, and shutdown revocation.
+ * Owns app-side resources for one detached root process: startup stdio, ownership rendezvous, and shutdown revocation.
  */
 internal class RootProcessHandle(
+    packageName: String,
     packageCodePath: String,
-    task: Shell.Task,
+    packageNativeLibrarySearchPath: String?,
+    codeCacheDir: () -> File,
+    handoffAuthority: String,
+    handoffToken: String,
     private val handleRootIo: suspend (ParcelFileDescriptor, ParcelFileDescriptor, ParcelFileDescriptor) -> Unit,
 ) : Closeable {
     private val ownership = RootProcessOwnership()
-    private val launcher = RootProcessLauncher(packageCodePath, task, ownership.socketName)
+    private val launcher = RootProcessLauncher(
+        packageName = packageName,
+        packageCodePath = packageCodePath,
+        packageNativeLibrarySearchPath = packageNativeLibrarySearchPath,
+        codeCacheDir = codeCacheDir,
+        ownershipSocketName = ownership.socketName,
+        handoffAuthority = handoffAuthority,
+        handoffToken = handoffToken,
+    )
 
     suspend fun run(rootServiceConnected: Job) = coroutineScope {
         val pipes = RootProcessPipes()

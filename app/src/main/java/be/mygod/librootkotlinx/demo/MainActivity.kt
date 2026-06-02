@@ -1,15 +1,19 @@
 package be.mygod.librootkotlinx.demo
 
+import android.os.Binder
 import android.os.Bundle
+import android.os.IBinder
+import android.os.Parcel
 import android.os.ParcelFileDescriptor
 import android.text.method.ScrollingMovementMethod
 import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.lifecycle.lifecycleScope
+import be.mygod.librootkotlinx.ParcelableBinder
 import be.mygod.librootkotlinx.ParcelableString
 import be.mygod.librootkotlinx.RootCommand
-import be.mygod.librootkotlinx.RootFlow
 import be.mygod.librootkotlinx.RootCommandNoResult
+import be.mygod.librootkotlinx.RootFlow
 import be.mygod.librootkotlinx.systemContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.flowOf
@@ -47,6 +51,21 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    @Parcelize
+    class BinderDemo(private val callback: ParcelableBinder) : RootCommand<ParcelableString> {
+        override suspend fun execute(): ParcelableString {
+            val data = Parcel.obtain()
+            val reply = Parcel.obtain()
+            return try {
+                callback.value.transact(IBinder.FIRST_CALL_TRANSACTION, data, reply, 0)
+                ParcelableString("binder caller uid: ${reply.readInt()}")
+            } finally {
+                reply.recycle()
+                data.recycle()
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -64,8 +83,18 @@ class MainActivity : ComponentActivity() {
                     val fdResult = withContext(Dispatchers.IO) {
                         ParcelFileDescriptor.AutoCloseInputStream(pipe[0]).bufferedReader().readText()
                     }
+                    val binder = object : Binder() {
+                        override fun onTransact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean {
+                            if (code == IBinder.FIRST_CALL_TRANSACTION) {
+                                reply?.writeInt(Binder.getCallingUid())
+                                return true
+                            }
+                            return super.onTransact(code, data, reply, flags)
+                        }
+                    }
+                    val binderResult = it.execute(BinderDemo(ParcelableBinder(binder))).value
                     it.execute(SimpleTest()).value + '\n' + it.flow(FlowDemo()).toList()
-                        .joinToString { it.value } + "\n\n" + fdResult
+                        .joinToString { it.value } + "\n\n" + fdResult + "\n" + binderResult
                 }
             } catch (e: Exception) {
                 e.printStackTrace()

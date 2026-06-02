@@ -32,7 +32,17 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class RootServer internal constructor() {
-    class UnexpectedExitException : RemoteException("Root service exited unexpectedly")
+    private companion object {
+        private const val UNEXPECTED_EXIT_MESSAGE = "Root service exited unexpectedly"
+
+        fun Throwable.asCancellationException() = when (this) {
+            is CancellationException -> this
+            else -> CancellationException(message).also { it.initCause(this) }
+        }
+    }
+    class UnexpectedExitException : RemoteException(UNEXPECTED_EXIT_MESSAGE) {
+        override val message get() = UNEXPECTED_EXIT_MESSAGE
+    }
 
     val active get() = connected != null && closeCause == null && serverJob.isActive
     private val lifecycleLock = Any()
@@ -74,13 +84,12 @@ class RootServer internal constructor() {
     }
 
     /**
-     * Initialize a RootServer by binding to a libsu RootService.
+     * Initialize a RootServer by starting the owned root command service.
      *
-     * Startup uses libsu's RootService bind handshake. [handleRootIo] is also used as a best-effort startup observer: if
-     * it returns or fails before the service connects, initialization fails. Custom handlers must stay suspended until
-     * startup completes; after startup, handler completion only ends IO handling. If the root-side service returns a null
-     * binding on API 23-27, libsu does not dispatch a null-binding callback, so callers that need bounded startup latency
-     * should apply their own timeout around initialization.
+     * Startup uses the direct provider handoff as its success signal. [handleRootIo] is also a startup observer: if it
+     * returns or fails before the service connects, initialization fails. Custom handlers must stay suspended until
+     * startup completes; after startup, handler completion only ends IO handling. Cancelling initialization revokes
+     * ownership of any root process that was started.
      *
      * @param context Any [Context] from the app.
      * @param handleRootIo Handler for observed root process stdin/stdout/stderr.
@@ -94,9 +103,7 @@ class RootServer internal constructor() {
             lifecycleStarted = true
         }
         // Start immediately so a close racing with init cannot cancel before cleanup is installed.
-        serverScope.launch(start = CoroutineStart.UNDISPATCHED) {
-            runLifecycle(context, handleRootIo)
-        }
+        serverScope.launch(start = CoroutineStart.UNDISPATCHED) { runLifecycle(context, handleRootIo) }
         try {
             started.await()
         } catch (e: Throwable) {
@@ -180,11 +187,16 @@ class RootServer internal constructor() {
      * Close the instance gracefully.
      */
     suspend fun close() {
-        Logger.me.d("Shutting down from client")
-        val cause = closeCause ?: CancellationException("Root server closed")
-        recordCloseCause(cause)
+        val cleanupWithoutLifecycle = synchronized(lifecycleLock) { !lifecycleStarted }
+        val cause = closeCause ?: run {
+            Logger.me.d("Shutting down from client")
+            val closed = CancellationException("Root server closed")
+            recordCloseCause(closed)
+            closeCause ?: closed
+        }
         serverJob.cancel(cause.asCancellationException())
         serverJob.join()
+        if (cleanupWithoutLifecycle) cleanup()
     }
 
     private suspend fun CoroutineScope.runLifecycle(
@@ -199,28 +211,18 @@ class RootServer internal constructor() {
                 canStartRootProcess = { closeCause == null },
                 onConnected = { trySendEvent(Event.Connected(it)) },
                 onCloseRequested = ::requestClose,
-                onUnexpectedExit = { UnexpectedExitException() },
                 onStartupFailed = { connection, cause -> trySendEvent(Event.StartupFailed(connection, cause)) },
             ).also {
                 pendingConnection = it
                 it.bind(this, rootServiceConnected)
             }
-            receiveUntilConnected()
-            receiveUntilClosed()
+            while (closeCause == null) handleEvent(events.receive())
         } catch (e: Throwable) {
             recordCloseCause(e)
         } finally {
             cleanup()
             serverJob.complete()
         }
-    }
-
-    private suspend fun receiveUntilConnected() {
-        while (closeCause == null && connected == null) handleEvent(events.receive())
-    }
-
-    private suspend fun receiveUntilClosed() {
-        while (closeCause == null) handleEvent(events.receive())
     }
 
     @OptIn(DelicateCoroutinesApi::class)
@@ -310,13 +312,17 @@ class RootServer internal constructor() {
         return true
     }
 
-    private fun recordCloseCause(cause: Throwable): Boolean = synchronized(lifecycleLock) {
-        if (closeCause == null) {
-            closeCause = cause
-            true
-        } else {
-            false
+    private fun recordCloseCause(cause: Throwable): Boolean {
+        val recorded = synchronized(lifecycleLock) {
+            if (closeCause == null) {
+                closeCause = cause
+                true
+            } else false
         }
+        if (recorded && cause !is CancellationException) {
+            Logger.me.w("Root server closing due to failure: ${cause.message ?: cause.javaClass.name}", cause)
+        }
+        return recorded
     }
 
     private suspend fun cleanup() {
@@ -324,6 +330,7 @@ class RootServer internal constructor() {
         val connected = connected
         val pendingConnection = pendingConnection
         recordCloseCause(cause)
+        if (cause !is CancellationException) Logger.me.w("Root server close cause", cause)
         rootServiceConnected.cancel(cause.asCancellationException())
         events.close(cause)
         if (!started.isCompleted) {
@@ -364,11 +371,4 @@ class RootServer internal constructor() {
     private fun trySendEvent(event: Event) = events.trySend(event).isSuccess
 
     private fun unavailableCause() = closeCause ?: UnexpectedExitException()
-
-    private companion object {
-        fun Throwable.asCancellationException() = when (this) {
-            is CancellationException -> this
-            else -> CancellationException(message).also { it.initCause(this) }
-        }
-    }
 }

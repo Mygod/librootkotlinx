@@ -7,11 +7,11 @@ import android.os.ParcelFileDescriptor
 import androidx.annotation.CallSuper
 import be.mygod.librootkotlinx.io.useLines
 import be.mygod.librootkotlinx.io.openReadChannel
-import kotlinx.coroutines.CoroutineStart
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -71,6 +71,7 @@ abstract class RootSession {
     private var leaseCount = 0L
     private var closeOnRelease = false
 
+    @Throws(NoShellException::class)
     suspend fun acquire(): RootServer {
         while (true) {
             var activeServer: RootServer? = null
@@ -196,6 +197,7 @@ abstract class RootSession {
             }
         }
     }
+    @Throws(NoShellException::class)
     suspend inline fun <T> use(block: (RootServer) -> T): T {
         val server = acquire()
         try {

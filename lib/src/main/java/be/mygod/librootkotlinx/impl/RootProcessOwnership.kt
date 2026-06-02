@@ -6,7 +6,6 @@ import android.net.LocalServerSocket
 import android.os.Handler
 import android.os.Looper
 import android.os.Process
-import android.util.Log
 import be.mygod.librootkotlinx.Logger
 import be.mygod.librootkotlinx.net.ALocalServerSocket
 import be.mygod.librootkotlinx.net.ALocalSocket
@@ -21,7 +20,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.system.exitProcess
 
 /**
- * Owns the app/root rendezvous socket used to keep a detached libsu root process tied to one app-side server.
+ * Owns the app/root rendezvous socket used to keep a detached root process tied to one app-side server.
  */
 internal class RootProcessOwnership : Closeable {
     val socketName = "librootkotlinx.${Process.myPid()}.${UUID.randomUUID()}"
@@ -77,7 +76,6 @@ internal class RootProcessOwnership : Closeable {
     }
 
     companion object {
-        private const val TAG = "RootServer"
         const val SOCKET_ENV = "LIBROOTKOTLINX_OWNERSHIP_SOCKET"
 
         fun connectFromRootProcess(): LocalSocket = try {
@@ -95,7 +93,7 @@ internal class RootProcessOwnership : Closeable {
                 throw e
             }
         } catch (e: Throwable) {
-            Log.e(TAG, "Failed to connect root process ownership socket", e)
+            Logger.me.e("Failed to connect root process ownership socket", e)
             e.printStackTrace()
             System.err.flush()
             exitProcess(1)
@@ -108,12 +106,12 @@ internal class RootProcessOwnership : Closeable {
                 var ownershipLost = false
                 try {
                     channel.discard()
-                    Log.w(TAG, "Root process ownership revoked")
+                    Logger.me.w("Root process ownership revoked")
                     ownershipLost = true
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Throwable) {
-                    Log.w(TAG, "Root process ownership monitor failed", e)
+                    Logger.me.w("Root process ownership monitor failed", e)
                     ownershipLost = true
                 } finally {
                     channel.cancel(null)

@@ -6,7 +6,6 @@ import android.os.ParcelFileDescriptor
 import android.os.Process
 import be.mygod.librootkotlinx.Logger
 import be.mygod.librootkotlinx.io.openReadChannel
-import com.topjohnwu.superuser.ShellUtils
 import java.io.Closeable
 import java.io.IOException
 
@@ -90,7 +89,7 @@ internal class RootProcessPipes {
     }
 
     companion object {
-        internal fun appFdPath(fd: Int, pid: Int = Process.myPid()) = ShellUtils.escapedString("/proc/$pid/fd/$fd")
+        internal fun appFdPath(fd: Int, pid: Int = Process.myPid()) = ShellScript.quote("/proc/$pid/fd/$fd")
 
         private fun fdPath(descriptor: ParcelFileDescriptor) = appFdPath(descriptor.fd)
     }
