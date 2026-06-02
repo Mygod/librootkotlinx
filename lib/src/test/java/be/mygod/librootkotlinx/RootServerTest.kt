@@ -139,7 +139,7 @@ class RootServerTest {
 
             assertTrue(logger.warnings.toString(), logger.warnings.any {
                 it.first?.startsWith("Root server closing due to failure: ") == true &&
-                        it.first?.contains("Root service exited unexpectedly") == true
+                        it.second is RootServer.UnexpectedExitException
             })
             assertTrue(logger.warnings.any { it.first == "Root server close cause" && it.second is RootServer.UnexpectedExitException })
             assertFalse(logger.debugs.contains("Shutting down from client"))

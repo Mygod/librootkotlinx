@@ -16,7 +16,6 @@ internal object RootProcessAppProcess {
         val relocated = "/dev/app_process_$token"
         return StringBuilder().apply {
             appendLine("[ -f ${ShellScript.quote(relocated)} ] || { " +
-                    "mkdir -p '/dev' && " +
                     "cp $myExe ${ShellScript.quote(relocated)} && " +
                     "chmod 700 ${ShellScript.quote(relocated)}; } || exit 1")
         } to relocated

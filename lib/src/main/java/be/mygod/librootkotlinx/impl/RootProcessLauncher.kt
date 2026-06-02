@@ -1,22 +1,33 @@
 package be.mygod.librootkotlinx.impl
 
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import be.mygod.librootkotlinx.NoShellException
+import be.mygod.librootkotlinx.io.ProcessPipes
+import be.mygod.librootkotlinx.io.ProcessPipes.Companion.startPipes
+import be.mygod.librootkotlinx.io.openReadChannel
+import be.mygod.librootkotlinx.io.openWriteChannel
+import be.mygod.librootkotlinx.io.useLines
+import io.ktor.utils.io.ByteReadChannel
+import io.ktor.utils.io.ByteWriteChannel
 import io.ktor.utils.io.readLine
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.runInterruptible
+import io.ktor.utils.io.writeFully
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.selects.select
 import java.io.File
 import java.io.FileNotFoundException
 import java.io.IOException
 import java.util.UUID
 
 /**
- * Builds and executes the short-lived root shell command that starts the detached root app_process.
+ * Builds and executes the root shell command that turns the shell process into the owned root app_process.
  *
  * This owns libsu RootServiceManager's app_process command contract instead of rewriting libsu's generated command.
- * The command keeps the base APK as the initial bootstrap classpath entry, redirects the detached child stdio to
- * app-owned pipes, and uses a marker pipe only to confirm that the child inherited those descriptors before the shell
- * exits.
+ * The command keeps the base APK as the initial bootstrap classpath entry, redirects app_process stdio to app-owned
+ * pipes, and writes a marker to a dedicated marker pipe after setup succeeds and immediately before app_process.
  *
  * libsu source:
  * https://github.com/topjohnwu/libsu/blob/4910d8dcc1ea3273246614b356fba56e1ce002a5/service/src/main/java/com/topjohnwu/superuser/internal/RootServiceManager.java#L191-L233
@@ -30,39 +41,152 @@ internal class RootProcessLauncher(
     private val handoffAuthority: String,
     private val handoffToken: String,
 ) {
-    suspend fun launch(pipes: RootProcessPipes) {
-        val startupNonce = UUID.randomUUID().toString()
-        runInterruptible(Dispatchers.IO) {
-            val shouldRelocate = Build.VERSION.SDK_INT < 26
-            executeRootShell(buildStartupCommand(
+    suspend fun launch(pipes: RootProcessPipes): ProcessPipes {
+        val rootShell = executeRootShell(
+            buildStartupCommand(
                 packageName = packageName,
                 packageCodePath = packageCodePath,
                 niceName = niceName,
-                stdioRedirect = pipes.redirect,
-                markerRedirect = pipes.markerRedirect,
-                startupNonce = startupNonce,
+                stdinPath = pipes.stdinPath,
+                stdoutPath = pipes.stdoutPath,
+                stderrPath = pipes.stderrPath,
+                markerPath = pipes.markerPath,
                 ownershipSocketName = ownershipSocketName,
                 handoffAuthority = handoffAuthority,
                 handoffToken = handoffToken,
                 appProcess = RootProcessAppProcess.myExe,
-                shouldRelocate = shouldRelocate,
-                relocationToken = if (shouldRelocate) relocationToken() else "",
-            ))
-        }
-        pipes.closeMarkerWrite()
+                shouldRelocate = Build.VERSION.SDK_INT < 26,
+                relocationToken = if (Build.VERSION.SDK_INT < 26) relocationToken() else "",
+            ),
+        )
+        var startupComplete = false
         val channel = pipes.openMarkerReadChannel()
-        try {
-            while (true) {
-                val marker = channel.readLine()
-                if (marker == startupMarker(STARTUP_MARKER_STARTED, startupNonce)) break
-                if (marker == startupMarker(STARTUP_MARKER_FAILED, startupNonce)) {
-                    throw IOException("Root service stdio redirection failed")
-                }
-                if (marker == null) throw IOException("Root service startup marker pipe closed")
+        val diagnostics = StringBuilder()
+        val diagnosticsSuffix = {
+            synchronized(diagnostics) {
+                val trimmed = diagnostics.toString().trim()
+                if (trimmed.isEmpty()) "" else ": $trimmed"
             }
-        } finally {
-            channel.cancel(null)
         }
+        try {
+            var shellOutputChannel: ByteReadChannel? = null
+            var shellErrorChannel: ByteReadChannel? = null
+            try {
+                val handler = Handler(Looper.getMainLooper())
+                val shellOutputPipe = checkNotNull(rootShell.stdout) { "Root shell stdout pipe was not requested" }
+                    .openReadChannel(handler)
+                shellOutputChannel = shellOutputPipe
+                val shellErrorPipe = checkNotNull(rootShell.stderr) { "Root shell stderr pipe was not requested" }
+                    .openReadChannel(handler)
+                shellErrorChannel = shellErrorPipe
+                coroutineScope {
+                    val shellOutput = async { shellOutputPipe.drainStartupDiagnostics(diagnostics) }
+                    val shellError = async { shellErrorPipe.drainStartupDiagnostics(diagnostics) }
+                    val diagnosticsClosed = async { listOfNotNull(shellOutput.await(), shellError.await()) }
+                    val marker = async { channel.readLine() }
+                    try {
+                        select<Unit> {
+                            marker.onAwait { line ->
+                                when (line) {
+                                    STARTUP_MARKER_STARTED -> startupComplete = true
+                                    null -> throw NoShellException(
+                                        "Root service startup marker pipe closed${diagnosticsSuffix()}",
+                                    )
+                                    else -> throw NoShellException(
+                                        "Unexpected root service startup marker: $line${diagnosticsSuffix()}",
+                                    )
+                                }
+                            }
+                            diagnosticsClosed.onAwait { drainFailures ->
+                                pipes.closeMarkerWrite()
+                                when (val line = marker.await()) {
+                                    STARTUP_MARKER_STARTED -> startupComplete = true
+                                    null -> {
+                                        val exitCode = rootShell.awaitExit()
+                                        throw NoShellException(
+                                            "Root shell exited before root service startup with exit code $exitCode${
+                                                diagnosticsSuffix()}",
+                                        ).also { failure -> drainFailures.forEach(failure::addSuppressed) }
+                                    }
+                                    else -> throw NoShellException(
+                                        "Unexpected root service startup marker: $line${diagnosticsSuffix()}",
+                                    ).also { failure -> drainFailures.forEach(failure::addSuppressed) }
+                                }
+                            }
+                        }
+                    } finally {
+                        pipes.closeMarkerWrite()
+                        shellOutputPipe.cancel(null)
+                        shellErrorPipe.cancel(null)
+                        marker.cancelAndJoin()
+                        diagnosticsClosed.cancelAndJoin()
+                        shellOutput.cancelAndJoin()
+                        shellError.cancelAndJoin()
+                    }
+                }
+            } catch (e: IOException) {
+                throw NoShellException("Root service startup marker read failed", e)
+            } finally {
+                shellOutputChannel?.cancel(null)
+                shellErrorChannel?.cancel(null)
+                channel.cancel(null)
+            }
+            return rootShell
+        } finally {
+            if (!startupComplete) rootShell.close()
+        }
+    }
+
+    private suspend fun ByteReadChannel.drainStartupDiagnostics(diagnostics: StringBuilder): IOException? {
+        return try {
+            useLines { line ->
+                synchronized(diagnostics) {
+                    diagnostics.appendLine(line)
+                    if (diagnostics.length > MAX_STARTUP_DIAGNOSTICS_LENGTH) {
+                        diagnostics.delete(0, diagnostics.length - MAX_STARTUP_DIAGNOSTICS_LENGTH)
+                    }
+                }
+            }
+            null
+        } catch (e: IOException) {
+            e
+        }
+    }
+
+    private suspend fun executeRootShell(command: String): ProcessPipes {
+        val process = startRootShell()
+        var input: ByteWriteChannel? = null
+        try {
+            val channel = checkNotNull(process.stdin) { "Root shell stdin pipe was not requested" }
+                .openWriteChannel(Handler(Looper.getMainLooper()))
+            input = channel
+            channel.writeFully(command.encodeToByteArray())
+            channel.flushAndClose()
+            return process
+        } catch (e: IOException) {
+            input?.cancel(e)
+            process.close()
+            throw NoShellException("Root shell died before root service startup", e)
+        } catch (e: InterruptedException) {
+            input?.cancel(e)
+            process.close()
+            Thread.currentThread().interrupt()
+            throw e
+        } catch (e: Throwable) {
+            input?.cancel(e)
+            process.close()
+            throw e
+        }
+    }
+
+    private fun startRootShell(): ProcessPipes {
+        var failure: IOException? = null
+        for (command in SU_COMMANDS) try {
+            return ProcessBuilder(command).startPipes()
+        } catch (e: IOException) {
+            failure?.addSuppressed(e) ?: run { failure = e }
+        }
+        throw NoShellException("Root shell is not available", checkNotNull(failure))
     }
 
     private fun relocationToken(): String {
@@ -78,61 +202,6 @@ internal class RootProcessLauncher(
         return "$packageName@$uuid"
     }
 
-    private fun executeRootShell(command: String) {
-        val process = startRootShell()
-        val output = StringBuilder()
-        try {
-            val writer = process.outputStream.bufferedWriter()
-            val reader = process.inputStream.bufferedReader()
-            val shellNonce = UUID.randomUUID().toString()
-            try {
-                writer.write("echo ${ShellScript.quote(shellNonce)}")
-                writer.newLine()
-                writer.flush()
-            } catch (e: IOException) {
-                throw NoShellException("Root shell died before startup", e)
-            }
-            while (true) {
-                val line = reader.readLine() ?: throw NoShellException(
-                    "Root shell exited before startup${process.waitFor().exitSuffix(output)}",
-                )
-                if (line.endsWith(shellNonce)) {
-                    if (line.length > shellNonce.length) output.appendLine(line.dropLast(shellNonce.length))
-                    break
-                }
-                output.appendLine(line)
-            }
-            try {
-                writer.write(command)
-                writer.newLine()
-                writer.write("exit")
-                writer.newLine()
-                writer.close()
-            } catch (e: IOException) {
-                throw NoShellException("Root shell died before root service startup", e)
-            }
-            while (true) output.appendLine(reader.readLine() ?: break)
-            val exitCode = process.waitFor()
-            if (exitCode != 0) {
-                throw IOException("Root service startup command failed${exitCode.exitSuffix(output)}")
-            }
-        } catch (e: InterruptedException) {
-            process.destroy()
-            Thread.currentThread().interrupt()
-            throw e
-        }
-    }
-
-    private fun startRootShell(): Process {
-        var failure: IOException? = null
-        for (command in SU_COMMANDS) try {
-            return ProcessBuilder(command).redirectErrorStream(true).start()
-        } catch (e: IOException) {
-            failure?.addSuppressed(e) ?: run { failure = e }
-        }
-        throw NoShellException("Root shell is not available", checkNotNull(failure))
-    }
-
     companion object {
         private val SU_COMMANDS = arrayOf(
             "/system/bin/su",
@@ -143,16 +212,17 @@ internal class RootProcessLauncher(
             "/data/adb/ap/bin/su",
             "su",
         )
-        private const val STARTUP_MARKER_STARTED = "librootkotlinx-started:"
-        private const val STARTUP_MARKER_FAILED = "librootkotlinx-failed:"
+        private const val STARTUP_MARKER_STARTED = "librootkotlinx-started"
+        private const val MAX_STARTUP_DIAGNOSTICS_LENGTH = 8192
 
         fun buildStartupCommand(
             packageName: String,
             packageCodePath: String,
             niceName: String,
-            stdioRedirect: String,
-            markerRedirect: String,
-            startupNonce: String,
+            stdinPath: String,
+            stdoutPath: String,
+            stderrPath: String,
+            markerPath: String,
             ownershipSocketName: String,
             handoffAuthority: String,
             handoffToken: String,
@@ -170,26 +240,19 @@ internal class RootProcessLauncher(
                 appProcess = executable,
                 niceName = niceName,
             )
-            val env = "${RootServiceHandoff.AUTHORITY_ENV}=${ShellScript.quote(handoffAuthority)} " +
-                    "${RootServiceHandoff.TOKEN_ENV}=${ShellScript.quote(handoffToken)} " +
-                    "${RootProcessOwnership.SOCKET_ENV}=${ShellScript.quote(ownershipSocketName)}"
-            val success = ShellScript.quote(startupMarker(STARTUP_MARKER_STARTED, startupNonce))
-            val failed = ShellScript.quote(startupMarker(STARTUP_MARKER_FAILED, startupNonce))
-            return "(if command exec 3>$markerRedirect; then " +
-                    "(if command exec$stdioRedirect; then " +
-                    "printf '%s\\n' $success >&3; " +
-                    "exec 3>&-; " +
-                    relocationScript +
-                    "$env $launch ${ShellScript.quote(packageName)} $userId; " +
-                    "else printf '%s\\n' $failed >&3; exit 1; fi)& " +
-                    "command exec 3>&-; else exit 1; fi)"
-        }
-
-        private fun startupMarker(prefix: String, nonce: String) = prefix + nonce
-
-        private fun Int.exitSuffix(output: StringBuilder): String {
-            val trimmed = output.toString().trim()
-            return if (trimmed.isEmpty()) " with exit code $this" else " with exit code $this: $trimmed"
+            return buildString {
+                appendLine("exec 3>$markerPath || exit 1")
+                appendLine("exec 4<$stdinPath || exit 1")
+                appendLine("exec 5>$stdoutPath || exit 1")
+                appendLine("exec 6>$stderrPath || exit 1")
+                append(relocationScript)
+                appendLine("printf '%s\\n' ${ShellScript.quote(STARTUP_MARKER_STARTED)} >&3 || exit 1")
+                appendLine("exec 3>&-")
+                appendLine("${RootServiceHandoff.AUTHORITY_ENV}=${ShellScript.quote(handoffAuthority)} ${
+                    RootServiceHandoff.TOKEN_ENV}=${ShellScript.quote(handoffToken)} ${
+                    RootProcessOwnership.SOCKET_ENV}=${ShellScript.quote(ownershipSocketName)} $launch ${
+                    ShellScript.quote(packageName)} $userId <&4 >&5 2>&6 4<&- 5>&- 6>&-")
+            }
         }
     }
 }

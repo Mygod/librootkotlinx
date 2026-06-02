@@ -19,7 +19,12 @@ internal class RootServiceConnection(
     context: Context,
     private val niceName: String,
     private val deathRecipient: IBinder.DeathRecipient,
-    private val handleRootIo: suspend (ParcelFileDescriptor, ParcelFileDescriptor, ParcelFileDescriptor) -> Unit,
+    private val handleRootLifecycle: suspend (
+        Process,
+        ParcelFileDescriptor,
+        ParcelFileDescriptor,
+        ParcelFileDescriptor,
+    ) -> Unit,
     private val canStartRootProcess: () -> Boolean,
     private val onConnected: (Connected) -> Boolean,
     private val onCloseRequested: (Throwable) -> Boolean,
@@ -68,7 +73,7 @@ internal class RootServiceConnection(
                 codeCacheDir = codeCacheDir,
                 handoffAuthority = handoffAuthority,
                 handoffToken = handoff.token,
-                handleRootIo = handleRootIo,
+                handleRootLifecycle = handleRootLifecycle,
             )
         } catch (e: Throwable) {
             handoff.close()

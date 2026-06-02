@@ -4,7 +4,6 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.os.ParcelFileDescriptor
-import android.os.Process
 import androidx.annotation.CallSuper
 import be.mygod.librootkotlinx.io.useLines
 import be.mygod.librootkotlinx.io.openReadChannel
@@ -39,15 +38,16 @@ abstract class RootSession {
     /**
      * Name passed to root app_process through --nice-name.
      */
-    protected open val niceName get() = "${context.packageName}:librootkotlinx:${Process.myUid() / 100000}"
+    protected open val niceName get() = "${context.packageName}:librootkotlinx:${android.os.Process.myUid() / 100000}"
 
     /**
-     * Handles observed stdin/stdout/stderr of the root app_process.
+     * Handles the root app_process lifecycle and observed stdin/stdout/stderr.
      *
-     * Keep this suspended while the descriptors should stay open. Returning or failing before startup completes makes
-     * startup fail; after startup, returning only ends IO handling.
+     * This is called after the root command service has connected. Keep it suspended while the descriptors should stay
+     * open. Returning only ends lifecycle handling.
      */
-    protected open suspend fun handleRootIo(
+    protected open suspend fun handleRootLifecycle(
+        process: Process,
         stdin: ParcelFileDescriptor,
         stdout: ParcelFileDescriptor,
         stderr: ParcelFileDescriptor,
@@ -61,7 +61,7 @@ abstract class RootSession {
     }
 
     @CallSuper
-    protected open suspend fun initServer(server: RootServer) = server.init(context, niceName, ::handleRootIo)
+    protected open suspend fun initServer(server: RootServer) = server.init(context, niceName, ::handleRootLifecycle)
 
     /**
      * Timeout to close [RootServer].

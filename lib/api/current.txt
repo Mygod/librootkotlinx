@@ -304,7 +304,7 @@ package be.mygod.librootkotlinx {
     method @InaccessibleFromKotlin protected abstract android.content.Context getContext();
     method @InaccessibleFromKotlin protected String getNiceName();
     method @InaccessibleFromKotlin protected kotlinx.coroutines.CoroutineDispatcher getTimeoutDispatcher();
-    method protected suspend Object? handleRootIo(android.os.ParcelFileDescriptor stdin, android.os.ParcelFileDescriptor stdout, android.os.ParcelFileDescriptor stderr, kotlin.coroutines.Continuation<? super kotlin.Unit>);
+    method protected suspend Object? handleRootLifecycle(Process process, android.os.ParcelFileDescriptor stdin, android.os.ParcelFileDescriptor stdout, android.os.ParcelFileDescriptor stderr, kotlin.coroutines.Continuation<? super kotlin.Unit>);
     method @CallSuper protected suspend Object? initServer(be.mygod.librootkotlinx.RootServer server, kotlin.coroutines.Continuation<? super kotlin.Unit>);
     method public final suspend Object? release(be.mygod.librootkotlinx.RootServer server, kotlin.coroutines.Continuation<? super kotlin.Unit>);
     method @kotlin.jvm.Throws(exceptionClasses=NoShellException::class) public final suspend inline <T> Object? use(kotlin.jvm.functions.Function1<? super be.mygod.librootkotlinx.RootServer,? extends T> block, kotlin.coroutines.Continuation<? super T>) throws be.mygod.librootkotlinx.NoShellException;
@@ -339,6 +339,24 @@ package be.mygod.librootkotlinx.io {
     method @InaccessibleFromKotlin public static void setNonblocking(java.io.FileDescriptor, boolean);
     method public static suspend Object? useLines(io.ktor.utils.io.ByteReadChannel, kotlin.jvm.functions.Function1<? super java.lang.String,kotlin.Unit> block, kotlin.coroutines.Continuation<? super kotlin.Unit>);
     property public static boolean java.io.FileDescriptor.isNonblocking;
+  }
+
+  public final class ProcessPipes implements java.io.Closeable {
+    method public suspend Object? awaitExit(kotlin.coroutines.Continuation<? super java.lang.Integer>);
+    method public void close();
+    method @InaccessibleFromKotlin public Process getProcess();
+    method @InaccessibleFromKotlin public android.os.ParcelFileDescriptor? getStderr();
+    method @InaccessibleFromKotlin public android.os.ParcelFileDescriptor? getStdin();
+    method @InaccessibleFromKotlin public android.os.ParcelFileDescriptor? getStdout();
+    property public Process process;
+    property public android.os.ParcelFileDescriptor? stderr;
+    property public android.os.ParcelFileDescriptor? stdin;
+    property public android.os.ParcelFileDescriptor? stdout;
+    field public static final be.mygod.librootkotlinx.io.ProcessPipes.Companion Companion;
+  }
+
+  public static final class ProcessPipes.Companion {
+    method @kotlin.jvm.Throws(exceptionClasses=IOException::class) public be.mygod.librootkotlinx.io.ProcessPipes startPipes(ProcessBuilder, optional boolean stdin, optional boolean stdout, optional boolean stderr) throws java.io.IOException;
   }
 
 }

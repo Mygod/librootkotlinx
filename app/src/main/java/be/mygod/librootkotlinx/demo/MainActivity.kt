@@ -2,7 +2,9 @@ package be.mygod.librootkotlinx.demo
 
 import android.os.Binder
 import android.os.Bundle
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.Parcel
 import android.os.ParcelFileDescriptor
 import android.text.method.ScrollingMovementMethod
@@ -14,26 +16,58 @@ import be.mygod.librootkotlinx.ParcelableString
 import be.mygod.librootkotlinx.RootCommand
 import be.mygod.librootkotlinx.RootCommandNoResult
 import be.mygod.librootkotlinx.RootFlow
+import be.mygod.librootkotlinx.io.FileDescriptorByteReadChannel
+import be.mygod.librootkotlinx.io.ProcessPipes.Companion.startPipes
+import be.mygod.librootkotlinx.io.openReadChannel
+import be.mygod.librootkotlinx.io.openWriteChannel
 import be.mygod.librootkotlinx.systemContext
-import kotlinx.coroutines.Dispatchers
+import io.ktor.utils.io.ByteWriteChannel
+import io.ktor.utils.io.core.readText
+import io.ktor.utils.io.readRemaining
+import io.ktor.utils.io.writeFully
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlinx.parcelize.Parcelize
 
 class MainActivity : ComponentActivity() {
     @Parcelize
     class SimpleTest : RootCommand<ParcelableString> {
-        override suspend fun execute() = ParcelableString("context: ${systemContext.packageName}\nuid: ${Jni.getuid()}\n" + withContext(Dispatchers.IO) {
+        override suspend fun execute() = ParcelableString("context: ${systemContext.packageName}\nuid: ${
+            Jni.getuid()}\n" + coroutineScope {
             // Try to execute a restricted subprocess command.
-            val process = ProcessBuilder("/system/bin/iptables", "-L", "INPUT").start()
-            var output = process.inputStream.reader().readText()
-            when (val exit = process.waitFor()) {
-                0 -> { }
-                else -> output += "Process exited with $exit"
+            ProcessBuilder("/system/bin/iptables", "-L", "INPUT").startPipes().use { process ->
+                val handler = Handler(Looper.getMainLooper())
+                var stdin: ByteWriteChannel? = null
+                var stdout: FileDescriptorByteReadChannel? = null
+                var stderr: FileDescriptorByteReadChannel? = null
+                try {
+                    val stdinChannel = checkNotNull(process.stdin) { "Process stdin pipe was not requested" }
+                        .openWriteChannel(handler)
+                    stdin = stdinChannel
+                    val stdoutChannel = checkNotNull(process.stdout) { "Process stdout pipe was not requested" }
+                        .openReadChannel(handler)
+                    stdout = stdoutChannel
+                    val stderrChannel = checkNotNull(process.stderr) { "Process stderr pipe was not requested" }
+                        .openReadChannel(handler)
+                    stderr = stderrChannel
+                    stdinChannel.flushAndClose()
+                    val stdoutText = async { stdoutChannel.readRemaining().readText() }
+                    val stderrText = async { stderrChannel.readRemaining().readText() }
+                    var output = stdoutText.await() + stderrText.await()
+                    when (val exit = process.awaitExit()) {
+                        0 -> { }
+                        else -> output += "Process exited with $exit"
+                    }
+                    output
+                } finally {
+                    stdin?.cancel(null)
+                    stdout?.cancel(null)
+                    stderr?.cancel(null)
+                }
             }
-            output
         })
     }
 
@@ -45,8 +79,13 @@ class MainActivity : ComponentActivity() {
     @Parcelize
     class FileDescriptorDemo(private val output: ParcelFileDescriptor) : RootCommandNoResult {
         override suspend fun execute() = null.also {
-            ParcelFileDescriptor.AutoCloseOutputStream(output).writer().use {
-                it.write("fd uid: ${Jni.getuid()}")
+            val channel = output.openWriteChannel(Handler(Looper.getMainLooper()))
+            try {
+                channel.writeFully("fd uid: ${Jni.getuid()}".encodeToByteArray())
+                channel.flushAndClose()
+            } catch (e: Throwable) {
+                channel.cancel(e)
+                throw e
             }
         }
     }
@@ -80,9 +119,9 @@ class MainActivity : ComponentActivity() {
                     } finally {
                         pipe[1].close()
                     }
-                    val fdResult = withContext(Dispatchers.IO) {
-                        ParcelFileDescriptor.AutoCloseInputStream(pipe[0]).bufferedReader().readText()
-                    }
+                    val fdResult = pipe[0].openReadChannel(Handler(Looper.getMainLooper()))
+                        .readRemaining()
+                        .readText()
                     val binder = object : Binder() {
                         override fun onTransact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean {
                             if (code == IBinder.FIRST_CALL_TRANSACTION) {

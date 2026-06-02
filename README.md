@@ -23,7 +23,7 @@ Use it now!
 ## Comparison with [libsu](https://github.com/topjohnwu/libsu)
 
 librootkotlinx is inspired by libsu's RootService backend.
-It keeps this library's coroutine-oriented `RootCommand` and `RootSession` API, starts a detached root `app_process`,
+It keeps this library's coroutine-oriented `RootCommand` and `RootSession` API, starts an owned root `app_process`,
 and hands the root command-service Binder directly to the app through an internal direct-boot-aware provider.
 
 * librootkotlinx supports only API 23+ instead of 19+ for libsu.
@@ -61,12 +61,12 @@ Greylisted/blacklisted APIs or internal constants: (some constants are hardcoded
 * (API 23-28) `Landroid/content/IContentProvider;->call(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Landroid/os/Bundle;)Landroid/os/Bundle;,max-target-q`
 * (API 29) `Landroid/content/IContentProvider;->call(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Landroid/os/Bundle;)Landroid/os/Bundle;`
 * (API 30) `Landroid/content/IContentProvider;->call(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Landroid/os/Bundle;)Landroid/os/Bundle;`
-* `Landroid/content/pm/ApplicationInfo;->primaryCpuAbi:Ljava/lang/String;,unsupported`
 * (API 24+) `Landroid/content/res/Resources;->getImpl()Landroid/content/res/ResourcesImpl;,unsupported`
 * `Landroid/content/res/Resources;->mSystem:Landroid/content/res/Resources;,unsupported`
 * (API 24+) `Landroid/content/res/Resources;->setImpl(Landroid/content/res/ResourcesImpl;)V,unsupported`
+* (API 23) `Ljava/lang/ProcessManager$ProcessInputStream;->fd:Ljava/io/FileDescriptor;`
+* (API 23) `Ljava/lang/ProcessManager$ProcessOutputStream;->fd:Ljava/io/FileDescriptor;`
 * (API 23) `Landroid/os/UserHandle;-><init>(I)V,unsupported`
-* (API 26+) `Lcom/android/internal/os/ZygoteInit;->createPathClassLoader(Ljava/lang/String;I)Ljava/lang/ClassLoader;,blocked`
 * `Llibcore/io/IoUtils;->setBlocking(Ljava/io/FileDescriptor;Z)V,core-platform-api,unsupported`
 
 <details>
@@ -121,6 +121,17 @@ Other:
   [libsu `RootServiceManager`'s app_process command contract](https://github.com/topjohnwu/libsu/blob/4910d8dcc1ea3273246614b356fba56e1ce002a5/service/src/main/java/com/topjohnwu/superuser/internal/RootServiceManager.java#L191-L233),
   while replacing libsu's root-main jar, `RootServerMain`, and broadcast handoff with a base-APK bootstrap classpath
   shape derived from [librootkotlinx v1 `AppProcess.launchString`](https://github.com/Mygod/librootkotlinx/blob/06701fd7d6f2fc115ee90cb47ee7105d94a6ddd3/lib/src/main/java/be/mygod/librootkotlinx/AppProcess.kt#L119-L136).
+* `ProcessPipes.startPipes` uses
+  [`ProcessBuilder.redirectInput(File)`](https://android.googlesource.com/platform/libcore/+/android-7.0.0_r1/ojluni/src/main/java/java/lang/ProcessBuilder.java#728),
+  [`redirectOutput(File)`](https://android.googlesource.com/platform/libcore/+/android-7.0.0_r1/ojluni/src/main/java/java/lang/ProcessBuilder.java#747),
+  and [`redirectError(File)`](https://android.googlesource.com/platform/libcore/+/android-7.0.0_r1/ojluni/src/main/java/java/lang/ProcessBuilder.java#766)
+  on API 24+, even though Android SDK metadata marks these APIs as 26+.
+  The API 23 fallback duplicates descriptors from process streams. AOSP's API 23 implementation exposes
+  [`ProcessInputStream.fd`](https://android.googlesource.com/platform/libcore/+/android-6.0.0_r1/luni/src/main/java/java/lang/ProcessManager.java#345)
+  and
+  [`ProcessOutputStream.fd`](https://android.googlesource.com/platform/libcore/+/android-6.0.0_r1/luni/src/main/java/java/lang/ProcessManager.java#371);
+  this library first uses the public `FileInputStream`/`FileOutputStream` descriptor access when possible and keeps
+  named-field reflection as the fallback for those API 23 stream classes.
 * `RootProcessBootstrap` starts from the base APK classpath, then asks the framework-created package context for the
   app class loader. That lets Android assemble base app code and native library paths through the normal package-loading
   path instead of duplicating `LoadedApk.makePaths(...)`.

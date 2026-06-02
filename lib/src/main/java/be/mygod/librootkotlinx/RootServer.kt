@@ -82,25 +82,29 @@ class RootServer internal constructor() {
     /**
      * Initialize a RootServer by starting the owned root command service.
      *
-     * Startup uses the direct provider handoff as its success signal. [handleRootIo] is also a startup observer: if it
-     * returns or fails before the service connects, initialization fails. Custom handlers must stay suspended until
-     * startup completes; after startup, handler completion only ends IO handling. Cancelling initialization revokes
-     * ownership of any root process that was started.
+     * Startup uses the direct provider handoff as its success signal. [handleRootLifecycle] is called only after the
+     * service connects; before then, startup stdio and process-exit diagnostics are library-owned. Cancelling
+     * initialization revokes ownership of any root process that was started.
      *
      * @param context Any [Context] from the app.
-     * @param handleRootIo Handler for observed root process stdin/stdout/stderr.
+     * @param handleRootLifecycle Handler for the root process and observed stdin/stdout/stderr.
      */
     internal suspend fun init(
         context: Context,
         niceName: String,
-        handleRootIo: suspend (ParcelFileDescriptor, ParcelFileDescriptor, ParcelFileDescriptor) -> Unit,
+        handleRootLifecycle: suspend (
+            Process,
+            ParcelFileDescriptor,
+            ParcelFileDescriptor,
+            ParcelFileDescriptor,
+        ) -> Unit,
     ) {
         synchronized(lifecycleLock) {
             require(!lifecycleStarted && closeCause == null) { "RootServer is already initialized or closed" }
             lifecycleStarted = true
         }
         // Start immediately so a close racing with init cannot cancel before cleanup is installed.
-        serverScope.launch(start = CoroutineStart.UNDISPATCHED) { runLifecycle(context, niceName, handleRootIo) }
+        serverScope.launch(start = CoroutineStart.UNDISPATCHED) { runLifecycle(context, niceName, handleRootLifecycle) }
         try {
             started.await()
         } catch (e: Throwable) {
@@ -199,14 +203,19 @@ class RootServer internal constructor() {
     private suspend fun CoroutineScope.runLifecycle(
         context: Context,
         niceName: String,
-        handleRootIo: suspend (ParcelFileDescriptor, ParcelFileDescriptor, ParcelFileDescriptor) -> Unit,
+        handleRootLifecycle: suspend (
+            Process,
+            ParcelFileDescriptor,
+            ParcelFileDescriptor,
+            ParcelFileDescriptor,
+        ) -> Unit,
     ) {
         try {
             RootServiceConnection(
                 context,
                 niceName,
                 callback,
-                handleRootIo,
+                handleRootLifecycle,
                 canStartRootProcess = { closeCause == null },
                 onConnected = { trySendEvent(Event.Connected(it)) },
                 onCloseRequested = ::requestClose,

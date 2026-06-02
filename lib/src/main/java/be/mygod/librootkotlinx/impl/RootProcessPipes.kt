@@ -31,10 +31,10 @@ internal class RootProcessPipes {
     private var markerRead: ParcelFileDescriptor?
     private var markerWrite: ParcelFileDescriptor?
 
-    val redirect get() = " <${fdPath(checkNotNull(stdinRead))}" +
-            " >${fdPath(checkNotNull(stdoutWrite))}" +
-            " 2>${fdPath(checkNotNull(stderrWrite))}"
-    val markerRedirect get() = fdPath(checkNotNull(markerWrite))
+    val stdinPath get() = fdPath(checkNotNull(stdinRead))
+    val stdoutPath get() = fdPath(checkNotNull(stdoutWrite))
+    val stderrPath get() = fdPath(checkNotNull(stderrWrite))
+    val markerPath get() = fdPath(checkNotNull(markerWrite))
 
     init {
         val stdin = ParcelFileDescriptor.createPipe()
@@ -89,9 +89,7 @@ internal class RootProcessPipes {
     }
 
     companion object {
-        internal fun appFdPath(fd: Int, pid: Int = Process.myPid()) = ShellScript.quote("/proc/$pid/fd/$fd")
-
-        private fun fdPath(descriptor: ParcelFileDescriptor) = appFdPath(descriptor.fd)
+        private fun fdPath(descriptor: ParcelFileDescriptor) = "/proc/${Process.myPid()}/fd/${descriptor.fd}"
     }
 }
 

@@ -20,7 +20,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.system.exitProcess
 
 /**
- * Owns the app/root rendezvous socket used to keep a detached root process tied to one app-side server.
+ * Owns the app/root rendezvous socket used to keep one root process tied to one app-side server.
  */
 internal class RootProcessOwnership : Closeable {
     val socketName = "librootkotlinx.${Process.myPid()}.${UUID.randomUUID()}"
