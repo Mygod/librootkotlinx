@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.os.ParcelFileDescriptor
+import android.os.Process
 import androidx.annotation.CallSuper
 import be.mygod.librootkotlinx.io.useLines
 import be.mygod.librootkotlinx.io.openReadChannel
@@ -36,6 +37,11 @@ abstract class RootSession {
     protected abstract val context: Context
 
     /**
+     * Name passed to root app_process through --nice-name.
+     */
+    protected open val niceName get() = "${context.packageName}:librootkotlinx:${Process.myUid() / 100000}"
+
+    /**
      * Handles observed stdin/stdout/stderr of the root app_process.
      *
      * Keep this suspended while the descriptors should stay open. Returning or failing before startup completes makes
@@ -55,7 +61,7 @@ abstract class RootSession {
     }
 
     @CallSuper
-    protected open suspend fun initServer(server: RootServer) = server.init(context, ::handleRootIo)
+    protected open suspend fun initServer(server: RootServer) = server.init(context, niceName, ::handleRootIo)
 
     /**
      * Timeout to close [RootServer].

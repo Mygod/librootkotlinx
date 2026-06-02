@@ -24,6 +24,7 @@ import java.io.IOException
 internal class RootProcessHandle(
     packageName: String,
     packageCodePath: String,
+    niceName: String,
     codeCacheDir: () -> File,
     handoffAuthority: String,
     handoffToken: String,
@@ -33,6 +34,7 @@ internal class RootProcessHandle(
     private val launcher = RootProcessLauncher(
         packageName = packageName,
         packageCodePath = packageCodePath,
+        niceName = niceName,
         codeCacheDir = codeCacheDir,
         ownershipSocketName = ownership.socketName,
         handoffAuthority = handoffAuthority,

@@ -18,21 +18,24 @@ Use it now!
 * 100% Kotlin public API with coroutines and `Parcelize`! Easy to use and virtually no boilerplate code/aidl
 * 100% event driven via coroutines, no blocking calls after the root app process is launched
 * Persistent root session that closes itself on inactive (optional and configurable)
-* Owned Binder IPC backend, including normal `IBinder` and `ParcelFileDescriptor` passing
-* No JitPack or libsu dependency required by consumers
+* Supports `IBinder` and `ParcelFileDescriptor` passing via a Binder IPC backend
 
 ## Comparison with [libsu](https://github.com/topjohnwu/libsu)
 
-librootkotlinx 2.0 uses an owned root backend instead of libsu's RootService backend.
+librootkotlinx is inspired by libsu's RootService backend.
 It keeps this library's coroutine-oriented `RootCommand` and `RootSession` API, starts a detached root `app_process`,
 and hands the root command-service Binder directly to the app through an internal direct-boot-aware provider.
 
 * librootkotlinx supports only API 23+ instead of 19+ for libsu.
 * librootkotlinx exposes suspend functions and Kotlin Flow instead of requiring consumers to write AIDL.
-* librootkotlinx supports more robust error surfacing and handling than libsu.
+* librootkotlinx uses content provider for Binder handoff, which is more robust and less prone to system broadcast pressure than libsu's broadcast path.
+* librootkotlinx supports more robust error surfacing, handling and recovery.
+  In contrast, libsu quietly swallows Exceptions/failures, does not support app-provided logger, and may block retry until the entire process is restarted.
+* librootkotlinx is cancellation aware whereas libsu provides no such path and has a fixed non-negotiable 10-second timeout as a workaround.
+* librootkotlinx does not provide a root shell API and thus does not need to keep an unused root shell process hanging around.
+* librootkotlinx avoids blocking I/O as much as possible.
 * librootkotlinx is strict one client to one server. Multiple client processes/users are unsupported.
-* libsu has additional APIs such as shell helpers and remote file system support; librootkotlinx intentionally keeps
-  those outside its public API.
+* libsu has additional APIs such as shell helpers and remote file system support; librootkotlinx intentionally keeps those outside its public API.
 
 ## Private APIs used / Assumptions for Android customizations
 
@@ -76,10 +79,6 @@ Greylisted/blacklisted APIs or internal constants: (some constants are hardcoded
 
 </details>
 
-Nonexported system resources:
-
-None.
-
 Other:
 
 * The root process calls the app-owned handoff provider through
@@ -122,10 +121,6 @@ Other:
   [libsu `RootServiceManager`'s app_process command contract](https://github.com/topjohnwu/libsu/blob/4910d8dcc1ea3273246614b356fba56e1ce002a5/service/src/main/java/com/topjohnwu/superuser/internal/RootServiceManager.java#L191-L233),
   while replacing libsu's root-main jar, `RootServerMain`, and broadcast handoff with a base-APK bootstrap classpath
   shape derived from [librootkotlinx v1 `AppProcess.launchString`](https://github.com/Mygod/librootkotlinx/blob/06701fd7d6f2fc115ee90cb47ee7105d94a6ddd3/lib/src/main/java/be/mygod/librootkotlinx/AppProcess.kt#L119-L136).
-* `app_process` relocation follows
-  [librootkotlinx v1 `AppProcess.relocateScript`](https://github.com/Mygod/librootkotlinx/blob/06701fd7d6f2fc115ee90cb47ee7105d94a6ddd3/lib/src/main/java/be/mygod/librootkotlinx/AppProcess.kt#L82-L117)
-  for API 23-25 only. The owned backend deliberately drops v1's API 29+ APEX/linker-config relocation branch because
-  modern Android app_process is not expected to live under `/data`.
 * `RootProcessBootstrap` starts from the base APK classpath, then asks the framework-created package context for the
   app class loader. That lets Android assemble base app code and native library paths through the normal package-loading
   path instead of duplicating `LoadedApk.makePaths(...)`.
@@ -139,7 +134,5 @@ The following Android system binaries or shell commands are assumed to be bundle
 
 * `/system/bin/su`, `/system/xbin/su`, `/sbin/su`, `/debug_ramdisk/su`, `/data/adb/ksu/bin/su`,
   `/data/adb/ap/bin/su`, or `su`;
-* `/proc/<pid>/fd/<n>` paths for app-owned stdin/stdout/stderr and startup-marker pipe redirection;
-* `/proc/self/exe` and `/proc/<pid>/exe` for `app_process` discovery/copying;
-* `/system/bin/app_process` as the fallback root `app_process` executable;
+* `/system/bin/app_process` as the fallback root `app_process` executable in case discovery fails;
 * `mkdir`, `cp`, `chmod`, `printf`, and shell `exec`.

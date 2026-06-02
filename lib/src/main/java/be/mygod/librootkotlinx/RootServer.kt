@@ -33,16 +33,12 @@ import kotlinx.coroutines.withContext
 
 class RootServer internal constructor() {
     private companion object {
-        private const val UNEXPECTED_EXIT_MESSAGE = "Root service exited unexpectedly"
-
         fun Throwable.asCancellationException() = when (this) {
             is CancellationException -> this
             else -> CancellationException(message).also { it.initCause(this) }
         }
     }
-    class UnexpectedExitException : RemoteException(UNEXPECTED_EXIT_MESSAGE) {
-        override val message get() = UNEXPECTED_EXIT_MESSAGE
-    }
+    class UnexpectedExitException : RemoteException("Root service exited unexpectedly")
 
     val active get() = connected != null && closeCause == null && serverJob.isActive
     private val lifecycleLock = Any()
@@ -96,6 +92,7 @@ class RootServer internal constructor() {
      */
     internal suspend fun init(
         context: Context,
+        niceName: String,
         handleRootIo: suspend (ParcelFileDescriptor, ParcelFileDescriptor, ParcelFileDescriptor) -> Unit,
     ) {
         synchronized(lifecycleLock) {
@@ -103,7 +100,7 @@ class RootServer internal constructor() {
             lifecycleStarted = true
         }
         // Start immediately so a close racing with init cannot cancel before cleanup is installed.
-        serverScope.launch(start = CoroutineStart.UNDISPATCHED) { runLifecycle(context, handleRootIo) }
+        serverScope.launch(start = CoroutineStart.UNDISPATCHED) { runLifecycle(context, niceName, handleRootIo) }
         try {
             started.await()
         } catch (e: Throwable) {
@@ -201,11 +198,13 @@ class RootServer internal constructor() {
 
     private suspend fun CoroutineScope.runLifecycle(
         context: Context,
+        niceName: String,
         handleRootIo: suspend (ParcelFileDescriptor, ParcelFileDescriptor, ParcelFileDescriptor) -> Unit,
     ) {
         try {
             RootServiceConnection(
                 context,
+                niceName,
                 callback,
                 handleRootIo,
                 canStartRootProcess = { closeCause == null },

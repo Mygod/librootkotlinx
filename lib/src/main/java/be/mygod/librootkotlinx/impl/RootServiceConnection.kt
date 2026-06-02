@@ -17,6 +17,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  */
 internal class RootServiceConnection(
     context: Context,
+    private val niceName: String,
     private val deathRecipient: IBinder.DeathRecipient,
     private val handleRootIo: suspend (ParcelFileDescriptor, ParcelFileDescriptor, ParcelFileDescriptor) -> Unit,
     private val canStartRootProcess: () -> Boolean,
@@ -63,6 +64,7 @@ internal class RootServiceConnection(
             RootProcessHandle(
                 packageName = packageName,
                 packageCodePath = packageCodePath,
+                niceName = niceName,
                 codeCacheDir = codeCacheDir,
                 handoffAuthority = handoffAuthority,
                 handoffToken = handoff.token,

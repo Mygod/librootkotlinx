@@ -24,6 +24,7 @@ import java.util.UUID
 internal class RootProcessLauncher(
     private val packageName: String,
     private val packageCodePath: String,
+    private val niceName: String,
     private val codeCacheDir: () -> File,
     private val ownershipSocketName: String,
     private val handoffAuthority: String,
@@ -36,6 +37,7 @@ internal class RootProcessLauncher(
             executeRootShell(buildStartupCommand(
                 packageName = packageName,
                 packageCodePath = packageCodePath,
+                niceName = niceName,
                 stdioRedirect = pipes.redirect,
                 markerRedirect = pipes.markerRedirect,
                 startupNonce = startupNonce,
@@ -147,6 +149,7 @@ internal class RootProcessLauncher(
         fun buildStartupCommand(
             packageName: String,
             packageCodePath: String,
+            niceName: String,
             stdioRedirect: String,
             markerRedirect: String,
             startupNonce: String,
@@ -165,7 +168,7 @@ internal class RootProcessLauncher(
                 packageCodePath = packageCodePath,
                 clazz = RootProcessBootstrap::class.java.name,
                 appProcess = executable,
-                niceName = "$packageName:librootkotlinx:$userId",
+                niceName = niceName,
             )
             val env = "${RootServiceHandoff.AUTHORITY_ENV}=${ShellScript.quote(handoffAuthority)} " +
                     "${RootServiceHandoff.TOKEN_ENV}=${ShellScript.quote(handoffToken)} " +
