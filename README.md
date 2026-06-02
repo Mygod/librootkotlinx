@@ -127,10 +127,11 @@ Other:
   for API 23-25 only. The owned backend deliberately drops v1's API 29+ APEX/linker-config relocation branch because
   modern Android app_process is not expected to live under `/data`.
 * `RootProcessBootstrap` starts from the base APK classpath, then asks the framework-created package context for the
-  app class loader. That lets Android assemble split APK and native library paths through the normal package-loading
+  app class loader. That lets Android assemble base app code and native library paths through the normal package-loading
   path instead of duplicating `LoadedApk.makePaths(...)`.
-  Since the bootstrap itself is loaded before that package class-loader handoff, consumers must package
-  `librootkotlinx` in the base APK. Depending on this library only from a dynamic feature split is not supported.
+  The root side does not support code or Parcelables packaged in split APKs or dynamic feature modules. Consumers must
+  package `librootkotlinx` and every `RootCommand`, `RootFlow`, `Parcelable`, exception class, and dependency that may
+  be loaded or unparceled in the root process in the base APK. This includes both ordinary and isolated feature splits.
 
 System/root command assumptions:
 
