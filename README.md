@@ -57,7 +57,9 @@ Greylisted/blacklisted APIs or internal constants: (some constants are hardcoded
 * (API 26+) `Landroid/app/LoadedApk;->makePaths(Landroid/app/ActivityThread;Landroid/content/pm/ApplicationInfo;Ljava/util/List;)V,lo-prio,max-target-o`
 * (API 26+) `Landroid/app/LoadedApk;->makePaths(Landroid/app/ActivityThread;ZLandroid/content/pm/ApplicationInfo;Ljava/util/List;Ljava/util/List;)V,lo-prio,max-target-o`
 * (API 31+) `Landroid/content/IContentProvider;->call(Landroid/content/AttributionSource;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Landroid/os/Bundle;)Landroid/os/Bundle;,blocked`
-* (API 23-30) `Landroid/content/IContentProvider;->call(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Landroid/os/Bundle;)Landroid/os/Bundle;,max-target-q`
+* (API 23-28) `Landroid/content/IContentProvider;->call(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Landroid/os/Bundle;)Landroid/os/Bundle;,max-target-q`
+* (API 29) `Landroid/content/IContentProvider;->call(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Landroid/os/Bundle;)Landroid/os/Bundle;`
+* (API 30) `Landroid/content/IContentProvider;->call(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Landroid/os/Bundle;)Landroid/os/Bundle;`
 * `Landroid/content/pm/ApplicationInfo;->primaryCpuAbi:Ljava/lang/String;,unsupported`
 * (API 24+) `Landroid/content/res/Resources;->getImpl()Landroid/content/res/ResourcesImpl;,unsupported`
 * `Landroid/content/res/Resources;->mSystem:Landroid/content/res/Resources;,unsupported`
@@ -94,11 +96,21 @@ Other:
   The API 23-28 external-provider acquisition/release signatures are
   [`getContentProviderExternal(..., token)`](https://android.googlesource.com/platform/frameworks/base/+/android-5.0.0_r1/core/java/android/app/IActivityManager.java#145)
   and [`removeContentProviderExternal(...)`](https://android.googlesource.com/platform/frameworks/base/+/android-5.0.0_r1/core/java/android/app/IActivityManager.java#148).
+  On API 23-28, the release path uses
+  [`UserHandle.getCallingUserId()`](https://android.googlesource.com/platform/frameworks/base/+/android-8.0.0_r1/services/core/java/com/android/server/am/ActivityManagerService.java#11743),
+  so secondary-user handoff is refused before external-provider acquisition.
 * Provider handoff uses
   [`IContentProvider.call(AttributionSource, ...)`](https://android.googlesource.com/platform/frameworks/base/+/android-12.0.0_r1/core/java/android/content/IContentProvider.java#123)
   with [`AttributionSource.myAttributionSource()`](https://android.googlesource.com/platform/frameworks/base/+/android-12.0.0_r1/core/java/android/content/AttributionSource.java#195),
-  with a pre-Android 12 fallback to
-  [`IContentProvider.call(String, ...)`](https://android.googlesource.com/platform/frameworks/base/+/android-5.0.0_r1/core/java/android/content/IContentProvider.java#58).
+  API 30
+  [`IContentProvider.call(callingPkg, attributionTag, authority, ...)`](https://android.googlesource.com/platform/frameworks/base/+/android-11.0.0_r1/core/java/android/content/IContentProvider.java#118),
+  API 29
+  [`IContentProvider.call(callingPkg, authority, ...)`](https://android.googlesource.com/platform/frameworks/base/+/android-10.0.0_r1/core/java/android/content/IContentProvider.java#82),
+  and the API 23-28
+  [`IContentProvider.call(callingPkg, method, ...)`](https://android.googlesource.com/platform/frameworks/base/+/android-5.0.0_r1/core/java/android/content/IContentProvider.java#58).
+  API 29+ must pass authority because
+  [`ContentProvider.Transport.call(...)`](https://android.googlesource.com/platform/frameworks/base/+/android-10.0.0_r1/core/java/android/content/ContentProvider.java#470)
+  validates it before dispatch.
 * Root package context creation assumes
   [`ActivityThread.systemMain()`](https://android.googlesource.com/platform/frameworks/base/+/android-5.0.0_r1/core/java/android/app/ActivityThread.java#5129),
   [`ActivityThread.getSystemContext()`](https://android.googlesource.com/platform/frameworks/base/+/android-5.0.0_r1/core/java/android/app/ActivityThread.java#1792),

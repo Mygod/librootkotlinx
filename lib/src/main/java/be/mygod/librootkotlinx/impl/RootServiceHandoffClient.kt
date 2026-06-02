@@ -16,16 +16,6 @@ import be.mygod.librootkotlinx.Logger
  * direct Binder handoff instead of libsu's manager Binder and broadcast path.
  *
  * Platform sources:
- * https://android.googlesource.com/platform/frameworks/base/+/android-8.0.0_r1/core/java/android/app/ActivityManager.java#4199
- * https://android.googlesource.com/platform/frameworks/base/+/android-5.0.0_r1/core/java/android/app/ActivityManagerNative.java#81
- * https://android.googlesource.com/platform/frameworks/base/+/android-10.0.0_r1/core/java/android/app/IActivityManager.aidl#317
- * https://android.googlesource.com/platform/frameworks/base/+/android-5.0.0_r1/core/java/android/app/IActivityManager.java#145
- * https://android.googlesource.com/platform/frameworks/base/+/android-10.0.0_r1/core/java/android/app/IActivityManager.aidl#322
- * https://android.googlesource.com/platform/frameworks/base/+/android-5.0.0_r1/core/java/android/app/IActivityManager.java#148
- * https://android.googlesource.com/platform/frameworks/base/+/android-5.0.0_r1/core/java/android/app/IActivityManager.java#474
- * https://android.googlesource.com/platform/frameworks/base/+/android-8.0.0_r1/core/java/android/app/ContentProviderHolder.java#33
- * https://android.googlesource.com/platform/frameworks/base/+/android-12.0.0_r1/core/java/android/content/IContentProvider.java#123
- * https://android.googlesource.com/platform/frameworks/base/+/android-5.0.0_r1/core/java/android/content/IContentProvider.java#58
  * https://android.googlesource.com/platform/frameworks/base/+/android-12.0.0_r1/core/java/android/content/AttributionSource.java#195
  */
 @SuppressLint("MissingPermission")
@@ -35,6 +25,14 @@ internal object RootServiceHandoffClient {
 
     fun handoff(context: Context, authority: String, token: String, serviceBinder: IBinder, targetUid: Int): Boolean {
         val userId = targetUid / PER_USER_RANGE
+        if (Build.VERSION.SDK_INT < 29 && userId != 0) {
+            // API 23-28 removeContentProviderExternal releases UserHandle.getCallingUserId(); root is always user 0.
+            // https://android.googlesource.com/platform/frameworks/base/+/android-8.0.0_r1/services/core/java/com/android/server/am/ActivityManagerService.java#11743
+            System.err.println("Root service handoff provider for user $userId is unsupported on API " +
+                    "${Build.VERSION.SDK_INT}: platform cannot release the acquired external provider")
+            System.err.flush()
+            return false
+        }
         val providerToken = Binder()
         val (getContentProviderExternal, getContentProviderExternalNew) = getContentProviderExternal
         val holder = if (getContentProviderExternalNew) {
@@ -56,16 +54,8 @@ internal object RootServiceHandoffClient {
                 putString(RootServiceHandoff.EXTRA_TOKEN, token)
                 putBinder(RootServiceHandoff.EXTRA_BINDER, serviceBinder)
             }
-            val result = if (Build.VERSION.SDK_INT >= 31) {
-                // Android 12+ IContentProvider.call requires AttributionSource.
-                // https://android.googlesource.com/platform/frameworks/base/+/android-12.0.0_r1/core/java/android/content/IContentProvider.java#123
-                callWithAttributionSource(provider, myAttributionSource(null), authority, RootServiceHandoff.METHOD,
-                    null, extras)
-            } else {
-                // Android 11 and older expose the calling-package overload.
-                // https://android.googlesource.com/platform/frameworks/base/+/android-5.0.0_r1/core/java/android/content/IContentProvider.java#58
-                callLegacy(provider, context.packageName, RootServiceHandoff.METHOD, null, extras)
-            } as Bundle?
+            val result = IContentProvider.compat(provider).call(
+                context.packageName, RootServiceHandoff.METHOD, authority, extras)
             val accepted = result?.getBoolean(RootServiceHandoff.EXTRA_ACCEPTED, false) == true
             if (!accepted) {
                 System.err.println("Root service handoff delivery rejected: $authority")
@@ -120,7 +110,7 @@ internal object RootServiceHandoffClient {
             iActivityManagerClass.getDeclaredMethod("removeContentProviderExternalAsUser", String::class.java,
                 IBinder::class.java, Integer.TYPE) to true
         } catch (e: NoSuchMethodException) {
-            if (Build.VERSION.SDK_INT >= 29) Logger.me.w("Unexpected getContentProviderExternal method missing", e)
+            if (Build.VERSION.SDK_INT >= 29) Logger.me.w("Unexpected removeContentProviderExternal method missing", e)
             // API 23-28 exposes only the calling-user release path.
             // https://android.googlesource.com/platform/frameworks/base/+/android-5.0.0_r1/core/java/android/app/IActivityManager.java#148
             iActivityManagerClass.getDeclaredMethod("removeContentProviderExternal", String::class.java,
@@ -139,19 +129,64 @@ internal object RootServiceHandoffClient {
         }
     }
 
-    private val iContentProviderClass by lazy { Class.forName("android.content.IContentProvider") }
+    sealed class IContentProvider(protected val provider: Any) {
+        abstract fun call(callingPackage: String, method: String, authority: String, extras: Bundle): Bundle?
 
-    private val callLegacy by lazy {
-        iContentProviderClass.getDeclaredMethod("call", String::class.java, String::class.java, String::class.java,
-            Bundle::class.java)
-    }
+        companion object {
+            fun compat(provider: Any) = when {
+                Build.VERSION.SDK_INT >= 31 -> Api31(provider)
+                Build.VERSION.SDK_INT >= 30 -> Api30(provider)
+                Build.VERSION.SDK_INT >= 29 -> Api29(provider)
+                else -> Api21(provider)
+            }
 
-    private val attributionSourceClass by lazy { Class.forName("android.content.AttributionSource") }
+            private val clazz by lazy { Class.forName("android.content.IContentProvider") }
+        }
 
-    private val myAttributionSource by lazy { attributionSourceClass.getDeclaredMethod("myAttributionSource") }
+        // API 21-28 exposes only the pre-authority overload.
+        // https://android.googlesource.com/platform/frameworks/base/+/android-5.0.0_r1/core/java/android/content/IContentProvider.java#58
+        class Api21(provider: Any) : IContentProvider(provider) {
+            private val call by lazy {
+                clazz.getDeclaredMethod("call", String::class.java, String::class.java, String::class.java,
+                    Bundle::class.java)
+            }
+            override fun call(callingPackage: String, method: String, authority: String, extras: Bundle) =
+                call(provider, callingPackage, method, null, extras) as Bundle?
+        }
 
-    private val callWithAttributionSource by lazy {
-        iContentProviderClass.getDeclaredMethod("call", attributionSourceClass, String::class.java, String::class.java,
-            String::class.java, Bundle::class.java)
+        // Android 10 validates authority before dispatching ContentProvider.call.
+        // https://android.googlesource.com/platform/frameworks/base/+/android-10.0.0_r1/core/java/android/content/IContentProvider.java#82
+        class Api29(provider: Any) : IContentProvider(provider) {
+            private val call by lazy {
+                clazz.getDeclaredMethod("call", String::class.java, String::class.java, String::class.java,
+                    String::class.java, Bundle::class.java)
+            }
+            override fun call(callingPackage: String, method: String, authority: String, extras: Bundle) =
+                call(provider, callingPackage, authority, method, null, extras) as Bundle?
+        }
+
+        // Android 11 requires the overload carrying attributionTag and authority.
+        // https://android.googlesource.com/platform/frameworks/base/+/android-11.0.0_r1/core/java/android/content/IContentProvider.java#118
+        class Api30(provider: Any) : IContentProvider(provider) {
+            private val call by lazy {
+                clazz.getDeclaredMethod("call", String::class.java, String::class.java, String::class.java,
+                    String::class.java, String::class.java, Bundle::class.java)
+            }
+            override fun call(callingPackage: String, method: String, authority: String, extras: Bundle) =
+                call(provider, callingPackage, null, authority, method, null, extras) as Bundle?
+        }
+
+        // Android 12+ IContentProvider.call requires AttributionSource.
+        // https://android.googlesource.com/platform/frameworks/base/+/android-12.0.0_r1/core/java/android/content/IContentProvider.java#123
+        class Api31(provider: Any) : IContentProvider(provider) {
+            private val classAttributionSource by lazy { Class.forName("android.content.AttributionSource") }
+            private val call by lazy {
+                clazz.getDeclaredMethod("call", classAttributionSource, String::class.java, String::class.java,
+                    String::class.java, Bundle::class.java)
+            }
+            private val myAttributionSource by lazy { classAttributionSource.getDeclaredMethod("myAttributionSource") }
+            override fun call(callingPackage: String, method: String, authority: String, extras: Bundle) =
+                call(provider, myAttributionSource(null), authority, method, null, extras) as Bundle?
+        }
     }
 }
