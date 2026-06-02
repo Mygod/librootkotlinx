@@ -1,6 +1,5 @@
 package be.mygod.librootkotlinx.impl
 
-import android.content.Context
 import android.os.IBinder
 import android.os.Parcelable
 import be.mygod.librootkotlinx.Logger
@@ -8,7 +7,6 @@ import be.mygod.librootkotlinx.ParcelableThrowable
 import be.mygod.librootkotlinx.RootCommand
 import be.mygod.librootkotlinx.RootCommandOneWay
 import be.mygod.librootkotlinx.RootFlow
-import be.mygod.librootkotlinx.systemContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
@@ -20,15 +18,11 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-internal class RootCommandService(context: Context? = null, private val stopRootProcess: () -> Unit = {}) {
+internal class RootCommandService(private val stopRootProcess: () -> Unit = {}) {
     private val serviceJob = SupervisorJob()
     private val commandScope = CoroutineScope(Dispatchers.Main.immediate + serviceJob)
     private val callbackDispatcher = Dispatchers.Default.limitedParallelism(1)
     private val commandJobs = RootCommandJobs()
-
-    init {
-        if (context != null) systemContext = context
-    }
 
     fun asBinder(): IBinder = binder
 

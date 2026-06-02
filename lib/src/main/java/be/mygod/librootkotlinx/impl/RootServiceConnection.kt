@@ -4,14 +4,12 @@ import android.content.Context
 import android.os.Build
 import android.os.IBinder
 import android.os.ParcelFileDescriptor
-import android.os.Process
 import android.os.RemoteException
 import be.mygod.librootkotlinx.Logger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
-import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -27,27 +25,7 @@ internal class RootServiceConnection(
     private val onStartupFailed: (RootServiceConnection, Throwable) -> Unit,
 ) {
     private val packageName = context.packageName
-    private val packageCodePaths = context.applicationInfo.run {
-        // Mirrors LoadedApk.makePaths code path assembly for app_process CLASSPATH.
-        // https://android.googlesource.com/platform/frameworks/base/+/android-7.0.0_r1/core/java/android/app/LoadedApk.java#316
-        sequenceOf(sourceDir).plus(splitSourceDirs.orEmpty().asSequence()).filterNotNull().toList()
-    }
-    private val packageCodePath = packageCodePaths.joinToString(File.pathSeparator).takeIf(String::isNotEmpty)
-            ?: context.packageCodePath
-    private val packageNativeLibrarySearchPath = context.applicationInfo.run {
-        buildList {
-            nativeLibraryDir?.takeIf(String::isNotEmpty)?.let(::add)
-            // Mirrors LoadedApk.makePaths adding apk!/lib/<abi> entries for non-extracted native libraries. Since
-            // ApplicationInfo.primaryCpuAbi is hidden, use the ABI list matching this app_process bitness.
-            // LoadedApk builds code paths from sourceDir/splitSourceDirs, then adds apk!/lib/<primaryCpuAbi> paths.
-            // https://android.googlesource.com/platform/frameworks/base/+/android-7.0.0_r1/core/java/android/app/LoadedApk.java#383
-            // https://android.googlesource.com/platform/frameworks/base/+/android-7.0.0_r1/core/java/android/app/LoadedApk.java#392
-            // https://android.googlesource.com/platform/frameworks/base/+/android-5.0.0_r1/core/java/android/content/pm/ApplicationInfo.java#538
-            val abis = if (Process.is64Bit()) Build.SUPPORTED_64_BIT_ABIS else Build.SUPPORTED_32_BIT_ABIS
-            if (abis.isEmpty()) return@buildList
-            packageCodePaths.forEach { apk -> if (apk.endsWith(".apk")) for (abi in abis) add("$apk!/lib/$abi") }
-        }.joinToString(File.pathSeparator).takeIf(String::isNotEmpty)
-    }
+    private val packageCodePath = context.applicationInfo.sourceDir?.takeIf(String::isNotEmpty) ?: context.packageCodePath
     private val codeCacheDir = {
         if (Build.VERSION.SDK_INT >= 24) context.createDeviceProtectedStorageContext() else {
             context
@@ -85,7 +63,6 @@ internal class RootServiceConnection(
             RootProcessHandle(
                 packageName = packageName,
                 packageCodePath = packageCodePath,
-                packageNativeLibrarySearchPath = packageNativeLibrarySearchPath,
                 codeCacheDir = codeCacheDir,
                 handoffAuthority = handoffAuthority,
                 handoffToken = handoff.token,

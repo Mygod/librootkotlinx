@@ -54,8 +54,6 @@ Greylisted/blacklisted APIs or internal constants: (some constants are hardcoded
 * (API 29+) `Landroid/app/IActivityManager;->getContentProviderExternal(Ljava/lang/String;ILandroid/os/IBinder;Ljava/lang/String;)Landroid/app/ContentProviderHolder;,blocked`
 * (API 23-28) `Landroid/app/IActivityManager;->removeContentProviderExternal(Ljava/lang/String;Landroid/os/IBinder;)V,max-target-r`
 * (API 29+) `Landroid/app/IActivityManager;->removeContentProviderExternalAsUser(Ljava/lang/String;Landroid/os/IBinder;I)V,blocked`
-* (API 26+) `Landroid/app/LoadedApk;->makePaths(Landroid/app/ActivityThread;Landroid/content/pm/ApplicationInfo;Ljava/util/List;)V,lo-prio,max-target-o`
-* (API 26+) `Landroid/app/LoadedApk;->makePaths(Landroid/app/ActivityThread;ZLandroid/content/pm/ApplicationInfo;Ljava/util/List;Ljava/util/List;)V,lo-prio,max-target-o`
 * (API 31+) `Landroid/content/IContentProvider;->call(Landroid/content/AttributionSource;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Landroid/os/Bundle;)Landroid/os/Bundle;,blocked`
 * (API 23-28) `Landroid/content/IContentProvider;->call(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Landroid/os/Bundle;)Landroid/os/Bundle;,max-target-q`
 * (API 29) `Landroid/content/IContentProvider;->call(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Landroid/os/Bundle;)Landroid/os/Bundle;`
@@ -122,21 +120,17 @@ Other:
   matching [libsu's root-service bootstrap](https://github.com/topjohnwu/libsu/blob/4910d8dcc1ea3273246614b356fba56e1ce002a5/service/jar/src/main/java/com/topjohnwu/superuser/internal/RootServerMain.java#L145-L156).
 * Shell command construction keeps
   [libsu `RootServiceManager`'s app_process command contract](https://github.com/topjohnwu/libsu/blob/4910d8dcc1ea3273246614b356fba56e1ce002a5/service/src/main/java/com/topjohnwu/superuser/internal/RootServiceManager.java#L191-L233),
-  while replacing libsu's root-main jar, `RootServerMain`, and broadcast handoff with the direct app APK classpath
-  shape from [librootkotlinx v1 `AppProcess.launchString`](https://github.com/Mygod/librootkotlinx/blob/06701fd7d6f2fc115ee90cb47ee7105d94a6ddd3/lib/src/main/java/be/mygod/librootkotlinx/AppProcess.kt#L119-L136).
+  while replacing libsu's root-main jar, `RootServerMain`, and broadcast handoff with a base-APK bootstrap classpath
+  shape derived from [librootkotlinx v1 `AppProcess.launchString`](https://github.com/Mygod/librootkotlinx/blob/06701fd7d6f2fc115ee90cb47ee7105d94a6ddd3/lib/src/main/java/be/mygod/librootkotlinx/AppProcess.kt#L119-L136).
 * `app_process` relocation follows
   [librootkotlinx v1 `AppProcess.relocateScript`](https://github.com/Mygod/librootkotlinx/blob/06701fd7d6f2fc115ee90cb47ee7105d94a6ddd3/lib/src/main/java/be/mygod/librootkotlinx/AppProcess.kt#L82-L117)
   for API 23-25 only. The owned backend deliberately drops v1's API 29+ APEX/linker-config relocation branch because
   modern Android app_process is not expected to live under `/data`.
-* Code and native library path construction follows
-  [`LoadedApk.makePaths(...)`](https://android.googlesource.com/platform/frameworks/base/+/android-7.0.0_r1/core/java/android/app/LoadedApk.java#316),
-  including `sourceDir`, `splitSourceDirs`, `nativeLibraryDir`, and APK `!/lib/<abi>` paths.
-  `ApplicationInfo.primaryCpuAbi` is
-  [hidden](https://android.googlesource.com/platform/frameworks/base/+/android-5.0.0_r1/core/java/android/content/pm/ApplicationInfo.java#538),
-  so the owned launcher uses the ABI list matching the current `app_process` bitness.
-* Root `app_process` uses `java.library.path` before
-  [`ZygoteInit.createPathClassLoader`](https://android.googlesource.com/platform/frameworks/base/+/android-8.0.0_r1/core/java/com/android/internal/os/ZygoteInit.java#520)
-  creates the class loader.
+* `RootProcessBootstrap` starts from the base APK classpath, then asks the framework-created package context for the
+  app class loader. That lets Android assemble split APK and native library paths through the normal package-loading
+  path instead of duplicating `LoadedApk.makePaths(...)`.
+  Since the bootstrap itself is loaded before that package class-loader handoff, consumers must package
+  `librootkotlinx` in the base APK. Depending on this library only from a dynamic feature split is not supported.
 
 System/root command assumptions:
 

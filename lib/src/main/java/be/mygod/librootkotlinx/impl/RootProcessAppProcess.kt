@@ -23,16 +23,15 @@ internal object RootProcessAppProcess {
     }
 
     /**
-     * Builds the app_process command from libsu RootServiceManager's launch contract and librootkotlinx v1's direct app
-     * APK classpath shape. Intentional changes from libsu: no root-main jar, no RootServerMain, no broadcast manager,
-     * app APK is the only classpath entry, and every generated shell value is quoted.
+     * Builds the app_process command from libsu RootServiceManager's launch contract. Intentional changes from libsu:
+     * no root-main jar, no RootServerMain, no broadcast manager, the base APK supplies only the bootstrap class, and
+     * every generated shell value is quoted.
      *
      * libsu source:
      * https://github.com/topjohnwu/libsu/blob/4910d8dcc1ea3273246614b356fba56e1ce002a5/service/src/main/java/com/topjohnwu/superuser/internal/RootServiceManager.java#L191-L233
      */
     fun launchString(
         packageCodePath: String,
-        packageNativeLibrarySearchPath: String? = null,
         clazz: String,
         appProcess: String,
         niceName: String,
@@ -52,21 +51,11 @@ internal object RootProcessAppProcess {
             )
             else -> emptyList()
         } else emptyList()
-        val nativeLibraryPath = if (packageNativeLibrarySearchPath.isNullOrEmpty()) emptyList() else {
-            // AOSP ZygoteInit.createPathClassLoader passes java.library.path into the PathClassLoader used by
-            // app_process, and Runtime.loadLibrary0 then asks that loader to find JNI libraries:
-            // https://android.googlesource.com/platform/frameworks/base/+/android-8.0.0_r1/core/java/com/android/internal/os/ZygoteInit.java#520
-            val javaLibraryPath = System.getProperty("java.library.path").orEmpty()
-            listOf("-Djava.library.path=${if (javaLibraryPath.isEmpty()) packageNativeLibrarySearchPath else {
-                "$packageNativeLibrarySearchPath:$javaLibraryPath"
-            }}")
-        }
         return listOf(
             "CLASSPATH=${ShellScript.quote(packageCodePath)}",
             "exec",
             ShellScript.quote(appProcess),
             *debugParams.toTypedArray(),
-            *nativeLibraryPath.map(ShellScript::quote).toTypedArray(),
             "-Xnoimage-dex2oat",
             "/system/bin",
             ShellScript.quote("--nice-name=$niceName"),

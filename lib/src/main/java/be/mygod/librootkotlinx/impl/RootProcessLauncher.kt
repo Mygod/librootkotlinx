@@ -14,9 +14,9 @@ import java.util.UUID
  * Builds and executes the short-lived root shell command that starts the detached root app_process.
  *
  * This owns libsu RootServiceManager's app_process command contract instead of rewriting libsu's generated command.
- * The command keeps the current app APK as the only classpath entry, supplies the app native library directory before
- * app_process creates its class loader, redirects the detached child stdio to app-owned pipes, and uses a marker pipe
- * only to confirm that the child inherited those descriptors before the shell exits.
+ * The command keeps the base APK as the initial bootstrap classpath entry, redirects the detached child stdio to
+ * app-owned pipes, and uses a marker pipe only to confirm that the child inherited those descriptors before the shell
+ * exits.
  *
  * libsu source:
  * https://github.com/topjohnwu/libsu/blob/4910d8dcc1ea3273246614b356fba56e1ce002a5/service/src/main/java/com/topjohnwu/superuser/internal/RootServiceManager.java#L191-L233
@@ -24,7 +24,6 @@ import java.util.UUID
 internal class RootProcessLauncher(
     private val packageName: String,
     private val packageCodePath: String,
-    private val packageNativeLibrarySearchPath: String?,
     private val codeCacheDir: () -> File,
     private val ownershipSocketName: String,
     private val handoffAuthority: String,
@@ -37,7 +36,6 @@ internal class RootProcessLauncher(
             executeRootShell(buildStartupCommand(
                 packageName = packageName,
                 packageCodePath = packageCodePath,
-                packageNativeLibrarySearchPath = packageNativeLibrarySearchPath,
                 stdioRedirect = pipes.redirect,
                 markerRedirect = pipes.markerRedirect,
                 startupNonce = startupNonce,
@@ -133,7 +131,7 @@ internal class RootProcessLauncher(
         throw NoShellException("Root shell is not available", checkNotNull(failure))
     }
 
-    internal companion object {
+    companion object {
         private val SU_COMMANDS = arrayOf(
             "/system/bin/su",
             "/system/xbin/su",
@@ -143,15 +141,12 @@ internal class RootProcessLauncher(
             "/data/adb/ap/bin/su",
             "su",
         )
-        private const val PER_USER_RANGE = 100000
         private const val STARTUP_MARKER_STARTED = "librootkotlinx-started:"
         private const val STARTUP_MARKER_FAILED = "librootkotlinx-failed:"
 
-        internal fun buildStartupCommand(
+        fun buildStartupCommand(
             packageName: String,
             packageCodePath: String,
-            packageNativeLibrarySearchPath: String? = null,
-            targetUid: Int = android.os.Process.myUid(),
             stdioRedirect: String,
             markerRedirect: String,
             startupNonce: String,
@@ -165,12 +160,12 @@ internal class RootProcessLauncher(
             val (relocationScript, executable) = if (shouldRelocate) {
                 RootProcessAppProcess.relocateScript(relocationToken)
             } else "" to appProcess
+            val userId = android.os.Process.myUid() / 100000    // PER_USER_RANGE
             val launch = RootProcessAppProcess.launchString(
                 packageCodePath = packageCodePath,
-                packageNativeLibrarySearchPath = packageNativeLibrarySearchPath,
-                clazz = RootProcessMain::class.java.name,
+                clazz = RootProcessBootstrap::class.java.name,
                 appProcess = executable,
-                niceName = "$packageName:root:${targetUid / PER_USER_RANGE}",
+                niceName = "$packageName:librootkotlinx:$userId",
             )
             val env = "${RootServiceHandoff.AUTHORITY_ENV}=${ShellScript.quote(handoffAuthority)} " +
                     "${RootServiceHandoff.TOKEN_ENV}=${ShellScript.quote(handoffToken)} " +
@@ -182,7 +177,7 @@ internal class RootProcessLauncher(
                     "printf '%s\\n' $success >&3; " +
                     "exec 3>&-; " +
                     relocationScript +
-                    "$env $launch ${ShellScript.quote(packageName)} $targetUid; " +
+                    "$env $launch ${ShellScript.quote(packageName)} $userId; " +
                     "else printf '%s\\n' $failed >&3; exit 1; fi)& " +
                     "command exec 3>&-; else exit 1; fi)"
         }

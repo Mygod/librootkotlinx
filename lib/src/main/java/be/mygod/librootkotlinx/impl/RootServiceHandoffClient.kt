@@ -21,10 +21,8 @@ import be.mygod.librootkotlinx.Logger
 @SuppressLint("MissingPermission")
 internal object RootServiceHandoffClient {
     private const val TAG = "RootServer"
-    private const val PER_USER_RANGE = 100000
 
-    fun handoff(context: Context, authority: String, token: String, serviceBinder: IBinder, targetUid: Int): Boolean {
-        val userId = targetUid / PER_USER_RANGE
+    fun handoff(context: Context, authority: String, token: String, serviceBinder: IBinder, userId: Int): Boolean {
         if (Build.VERSION.SDK_INT < 29 && userId != 0) {
             // API 23-28 removeContentProviderExternal releases UserHandle.getCallingUserId(); root is always user 0.
             // https://android.googlesource.com/platform/frameworks/base/+/android-8.0.0_r1/services/core/java/com/android/server/am/ActivityManagerService.java#11743
