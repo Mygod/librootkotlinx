@@ -35,7 +35,12 @@ internal object RootProcessBootstrap {
             val userId = args[1].toInt()
             patchLgeResourcesIfNeeded()
             val context = createRootPackageContext(args[0], userId)
-            context.classLoader.loadClass(RootProcessMain::class.java.name).getDeclaredMethod("main",
+            val classLoader = context.classLoader
+            // Mirrors LoadedApk.initializeJavaContextClassLoader keeping thread-context lookups on the package loader.
+            // The root process hosts only this package after Bootstrap creates the package context.
+            // AOSP: https://android.googlesource.com/platform/frameworks/base/+/1cdfff555f4a21f71ccc978290e2e212e2f8b168/core/java/android/app/LoadedApk.java#1218
+            Thread.currentThread().contextClassLoader = classLoader
+            classLoader.loadClass(RootProcessMain::class.java.name).getDeclaredMethod("main",
                 Context::class.java, Int::class.javaPrimitiveType)(null, context, userId)
         } finally {
             processJob.cancel()
