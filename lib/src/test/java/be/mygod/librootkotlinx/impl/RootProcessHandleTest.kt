@@ -93,7 +93,7 @@ class RootProcessHandleTest {
 
             ownershipAccepted.complete(Unit)
 
-            awaitCancellation(startup)
+            assertEquals("server closed", awaitCancellation(startup).message)
             assertEquals(0, awaitFailureExitCalls)
         }
     }
@@ -106,7 +106,7 @@ class RootProcessHandleTest {
         e
     }
 
-    private suspend fun awaitCancellation(startup: Deferred<Unit>) = try {
+    private suspend fun awaitCancellation(startup: Deferred<Unit>): CancellationException = try {
         startup.await()
         fail("Expected startup cancellation")
         throw AssertionError()

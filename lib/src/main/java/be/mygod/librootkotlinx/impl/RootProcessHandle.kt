@@ -161,7 +161,7 @@ internal class RootProcessHandle(
                 }
             }
             currentCoroutineContext().ensureActive()
-            if (rootServiceConnected.isCancelled) throw CancellationException("Root startup cancelled")
+            if (rootServiceConnected.isCancelled) rootServiceConnected.ensureActive()
         }
     }
 }
