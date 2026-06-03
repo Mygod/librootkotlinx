@@ -341,8 +341,14 @@ package be.mygod.librootkotlinx.io {
     property public static boolean java.io.FileDescriptor.isNonblocking;
   }
 
+  public final class ProcessCompat {
+    method public static suspend Object? awaitExit(Process, kotlin.coroutines.Continuation<? super java.lang.Integer>);
+    method @InaccessibleFromKotlin public static int getPid(Process);
+    method @kotlin.jvm.Throws(exceptionClasses=IOException::class) public static be.mygod.librootkotlinx.io.ProcessPipes startPipes(ProcessBuilder, optional boolean stdin, optional boolean stdout, optional boolean stderr) throws java.io.IOException;
+    property public static int Process.pid;
+  }
+
   public final class ProcessPipes implements java.io.Closeable {
-    method public suspend Object? awaitExit(kotlin.coroutines.Continuation<? super java.lang.Integer>);
     method public void close();
     method @InaccessibleFromKotlin public Process getProcess();
     method @InaccessibleFromKotlin public android.os.ParcelFileDescriptor? getStderr();
@@ -352,11 +358,6 @@ package be.mygod.librootkotlinx.io {
     property public android.os.ParcelFileDescriptor? stderr;
     property public android.os.ParcelFileDescriptor? stdin;
     property public android.os.ParcelFileDescriptor? stdout;
-    field public static final be.mygod.librootkotlinx.io.ProcessPipes.Companion Companion;
-  }
-
-  public static final class ProcessPipes.Companion {
-    method @kotlin.jvm.Throws(exceptionClasses=IOException::class) public be.mygod.librootkotlinx.io.ProcessPipes startPipes(ProcessBuilder, optional boolean stdin, optional boolean stdout, optional boolean stderr) throws java.io.IOException;
   }
 
 }

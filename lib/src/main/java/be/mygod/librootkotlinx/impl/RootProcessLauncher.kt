@@ -5,9 +5,10 @@ import android.os.Handler
 import android.os.Looper
 import be.mygod.librootkotlinx.NoShellException
 import be.mygod.librootkotlinx.io.ProcessPipes
-import be.mygod.librootkotlinx.io.ProcessPipes.Companion.startPipes
+import be.mygod.librootkotlinx.io.awaitExit
 import be.mygod.librootkotlinx.io.openReadChannel
 import be.mygod.librootkotlinx.io.openWriteChannel
+import be.mygod.librootkotlinx.io.startPipes
 import be.mygod.librootkotlinx.io.useLines
 import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.ByteWriteChannel
@@ -102,7 +103,7 @@ internal class RootProcessLauncher(
                                 when (val line = marker.await()) {
                                     STARTUP_MARKER_STARTED -> startupComplete = true
                                     null -> throw NoShellException("Root shell exited unexpectedly with code ${
-                                        rootShell.awaitExit()}${diagnosticsSuffix()}").also { failure ->
+                                        rootShell.process.awaitExit()}${diagnosticsSuffix()}").also { failure ->
                                             drainFailures.forEach(failure::addSuppressed)
                                         }
                                     else -> throw NoShellException(

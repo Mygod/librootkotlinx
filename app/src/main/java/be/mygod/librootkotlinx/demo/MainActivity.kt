@@ -17,11 +17,11 @@ import be.mygod.librootkotlinx.RootCommand
 import be.mygod.librootkotlinx.RootCommandNoResult
 import be.mygod.librootkotlinx.RootFlow
 import be.mygod.librootkotlinx.io.FileDescriptorByteReadChannel
-import be.mygod.librootkotlinx.io.ProcessPipes.Companion.startPipes
+import be.mygod.librootkotlinx.io.awaitExit
 import be.mygod.librootkotlinx.io.openReadChannel
 import be.mygod.librootkotlinx.io.openWriteChannel
+import be.mygod.librootkotlinx.io.startPipes
 import be.mygod.librootkotlinx.systemContext
-import io.ktor.utils.io.ByteWriteChannel
 import io.ktor.utils.io.core.readText
 import io.ktor.utils.io.readRemaining
 import io.ktor.utils.io.writeFully
@@ -50,7 +50,7 @@ class MainActivity : ComponentActivity() {
                     val stdoutText = async { stdoutChannel.readRemaining().readText() }
                     val stderrText = async { stderrChannel.readRemaining().readText() }
                     var output = stdoutText.await() + stderrText.await()
-                    when (val exit = process.awaitExit()) {
+                    when (val exit = process.process.awaitExit()) {
                         0 -> { }
                         else -> output += "Process exited with $exit"
                     }

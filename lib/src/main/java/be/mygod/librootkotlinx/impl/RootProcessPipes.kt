@@ -4,7 +4,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.ParcelFileDescriptor
 import be.mygod.librootkotlinx.Logger
-import be.mygod.librootkotlinx.io.ProcessPipes
+import be.mygod.librootkotlinx.io.fdPath
 import be.mygod.librootkotlinx.io.openReadChannel
 import java.io.Closeable
 import java.io.IOException
@@ -31,10 +31,10 @@ internal class RootProcessPipes {
     private var markerRead: ParcelFileDescriptor?
     private var markerWrite: ParcelFileDescriptor?
 
-    val stdinPath get() = ProcessPipes.fdPath(checkNotNull(stdinRead))
-    val stdoutPath get() = ProcessPipes.fdPath(checkNotNull(stdoutWrite))
-    val stderrPath get() = ProcessPipes.fdPath(checkNotNull(stderrWrite))
-    val markerPath get() = ProcessPipes.fdPath(checkNotNull(markerWrite))
+    val stdinPath get() = fdPath(checkNotNull(stdinRead))
+    val stdoutPath get() = fdPath(checkNotNull(stdoutWrite))
+    val stderrPath get() = fdPath(checkNotNull(stderrWrite))
+    val markerPath get() = fdPath(checkNotNull(markerWrite))
 
     init {
         val stdin = ParcelFileDescriptor.createPipe()

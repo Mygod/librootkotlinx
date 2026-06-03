@@ -5,6 +5,7 @@ import android.os.Looper
 import android.os.ParcelFileDescriptor
 import be.mygod.librootkotlinx.Logger
 import be.mygod.librootkotlinx.io.FileDescriptorByteReadChannel
+import be.mygod.librootkotlinx.io.awaitExit
 import be.mygod.librootkotlinx.io.openReadChannel
 import be.mygod.librootkotlinx.io.useLines
 import kotlinx.coroutines.CancellationException
@@ -93,7 +94,9 @@ internal class RootProcessHandle(
                 for (drain in startupDiagnosticDrains) drain.join()
             }
             try {
-                awaitRootStartup(rootServiceConnected, ownershipAccepted, startupStdioClosed, process::awaitExit)
+                awaitRootStartup(rootServiceConnected, ownershipAccepted, startupStdioClosed) {
+                    process.process.awaitExit()
+                }
             } finally {
                 ownershipAccepted.cancelAndJoin()
                 startupStdioClosed.cancelAndJoin()

@@ -77,6 +77,12 @@ Greylisted/blacklisted APIs or internal constants: (some constants are hardcoded
 
 </details>
 
+Optional hidden APIs used only for nonblocking optimization/optional helper methods:
+
+* (API 31+) `Landroid/os/Process;->openPidFd(II)Ljava/io/FileDescriptor;,blocked`
+* (API 24+) `Ljava/lang/UNIXProcess;->pid:I,unsupported`
+* (API 23) `Ljava/lang/ProcessManager$ProcessImpl;->pid:I`
+
 Other:
 
 * The root process calls the app-owned handoff provider through
