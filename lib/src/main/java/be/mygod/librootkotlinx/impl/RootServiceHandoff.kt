@@ -9,8 +9,6 @@ import java.util.concurrent.ConcurrentHashMap
 
 @SuppressLint("RestrictedApi")
 internal object RootServiceHandoff {
-    const val AUTHORITY_ENV = "LIBROOTKOTLINX_HANDOFF_AUTHORITY"
-    const val TOKEN_ENV = "LIBROOTKOTLINX_HANDOFF_TOKEN"
     const val METHOD = "be.mygod.librootkotlinx.ROOT_SERVICE_HANDOFF"
     const val EXTRA_TOKEN = "token"
     const val EXTRA_BINDER = "binder"

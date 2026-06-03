@@ -58,39 +58,39 @@ internal class RootProcessHandle(
     suspend fun run(rootServiceConnected: Job) = coroutineScope {
         val pipes = RootProcessPipes()
         var handlerStdio: RootProcessHandlerStdio? = null
-        var stdoutDiagnostic: FileDescriptorByteReadChannel? = null
-        var stderrDiagnostic: FileDescriptorByteReadChannel? = null
-        var stdoutDrain: Job? = null
-        var stderrDrain: Job? = null
+        val diagnosticChannels = ArrayList<FileDescriptorByteReadChannel>(2)
+        val diagnosticDrains = ArrayList<Job>(2)
+        suspend fun cancelDiagnostics() {
+            withContext(NonCancellable) {
+                for (drain in diagnosticDrains) drain.cancel()
+                for (channel in diagnosticChannels) channel.cancel(null)
+                for (drain in diagnosticDrains) drain.join()
+            }
+            diagnosticDrains.clear()
+            diagnosticChannels.clear()
+        }
         try {
             val stdio = pipes.takeHandlerStdio().also { handlerStdio = it }
             val handler = Handler(Looper.getMainLooper())
-            val stdoutDiagnosticChannel = stdio.stdout.dup().openReadChannel(handler)
-            stdoutDiagnostic = stdoutDiagnosticChannel
-            val stderrDiagnosticChannel = stdio.stderr.dup().openReadChannel(handler)
-            stderrDiagnostic = stderrDiagnosticChannel
-            val stdoutDrainJob = launch {
-                try {
-                    stdoutDiagnosticChannel.useLines(Logger.me::i)
-                } catch (e: IOException) {
-                    if (currentCoroutineContext().isActive) Logger.me.w("Root startup diagnostic drain failed", e)
+            for ((descriptor, log) in listOf(stdio.stdout to Logger.me::i, stdio.stderr to Logger.me::e)) {
+                val channel = descriptor.dup().openReadChannel(handler)
+                diagnosticChannels += channel
+                diagnosticDrains += launch {
+                    try {
+                        channel.useLines { log(it, null) }
+                    } catch (e: IOException) {
+                        if (currentCoroutineContext().isActive) {
+                            Logger.me.w("Root startup diagnostic drain failed", e)
+                        }
+                    }
                 }
             }
-            val stderrDrainJob = launch {
-                try {
-                    stderrDiagnosticChannel.useLines(Logger.me::e)
-                } catch (e: IOException) {
-                    if (currentCoroutineContext().isActive) Logger.me.w("Root startup diagnostic drain failed", e)
-                }
-            }
-            stdoutDrain = stdoutDrainJob
-            stderrDrain = stderrDrainJob
             val process = launcher.launch(pipes).also { this@RootProcessHandle.process = it.process }
             pipes.closeRemaining()
             val ownershipAccepted = async { ownership.accept() }
+            val startupDiagnosticDrains = diagnosticDrains.toList()
             val startupStdioClosed = async {
-                stdoutDrainJob.join()
-                stderrDrainJob.join()
+                for (drain in startupDiagnosticDrains) drain.join()
             }
             try {
                 awaitRootStartup(rootServiceConnected, ownershipAccepted, startupStdioClosed, process::awaitExit)
@@ -98,18 +98,7 @@ internal class RootProcessHandle(
                 ownershipAccepted.cancelAndJoin()
                 startupStdioClosed.cancelAndJoin()
             }
-            withContext(NonCancellable) {
-                stdoutDrainJob.cancel()
-                stderrDrainJob.cancel()
-                stdoutDiagnosticChannel.cancel(null)
-                stderrDiagnosticChannel.cancel(null)
-                stdoutDrainJob.join()
-                stderrDrainJob.join()
-            }
-            stdoutDrain = null
-            stderrDrain = null
-            stdoutDiagnostic = null
-            stderrDiagnostic = null
+            cancelDiagnostics()
             val handlerCompletion = CompletableDeferred<Throwable?>()
             launch {
                 var failure: Throwable? = null
@@ -129,22 +118,13 @@ internal class RootProcessHandle(
                 stdio.close()
                 if (it is CancellationException) {
                     handlerCompletion.cancel(it)
-                } else {
-                    handlerCompletion.complete(it)
-                }
+                } else handlerCompletion.complete(it)
             }
             handlerStdio = null
             handlerCompletion.await()
         } finally {
-            withContext(NonCancellable) {
-                stdoutDrain?.cancel()
-                stderrDrain?.cancel()
-                stdoutDiagnostic?.cancel(null)
-                stderrDiagnostic?.cancel(null)
-                stdoutDrain?.join()
-                stderrDrain?.join()
-                handlerStdio?.close()
-            }
+            cancelDiagnostics()
+            withContext(NonCancellable) { handlerStdio?.close() }
             pipes.closeRemaining()
         }
     }
@@ -154,7 +134,7 @@ internal class RootProcessHandle(
         process?.destroy()
     }
 
-    internal companion object {
+    companion object {
         suspend fun awaitRootStartup(
             rootServiceConnected: Job,
             ownershipAccepted: Deferred<Unit>,
@@ -165,14 +145,16 @@ internal class RootProcessHandle(
                 ownershipAccepted.onAwait { }
                 startupStdioClosed.onAwait {
                     val exitCode = awaitFailureExit()
-                    throw IOException("Root process stdout/stderr closed before ownership accepted with exit code $exitCode")
+                    throw IOException(
+                        "Root process stdout/stderr closed before ownership accepted with exit code $exitCode")
                 }
             }
             select {
                 rootServiceConnected.onJoin { }
                 startupStdioClosed.onAwait {
                     val exitCode = awaitFailureExit()
-                    throw IOException("Root process stdout/stderr closed before root service connected with exit code $exitCode")
+                    throw IOException(
+                        "Root process stdout/stderr closed before root service connected with exit code $exitCode")
                 }
             }
             currentCoroutineContext().ensureActive()

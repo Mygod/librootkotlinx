@@ -99,20 +99,12 @@ internal class RootServiceConnection(
         // Revoking root-process ownership exits the root process, so close the Binder service first.
         accepted?.close("during cleanup")
         if (delivered !== accepted) delivered?.close("during cleanup")
-        cancelStartup(cause)
-        joinStartup()
+        startupJob?.cancel(cause)
+        rootProcess?.close()
+        startupJob?.join()
         handoff?.close()
         handoff = null
         connected = null
-    }
-
-    private fun cancelStartup(cause: CancellationException) {
-        startupJob?.cancel(cause)
-        rootProcess?.close()
-    }
-
-    private suspend fun joinStartup() {
-        startupJob?.join()
     }
 
     class Connected internal constructor(
@@ -122,7 +114,7 @@ internal class RootServiceConnection(
     ) {
         private val closed = AtomicBoolean()
 
-        suspend fun close(reason: String) {
+        fun close(reason: String) {
             if (!closed.compareAndSet(false, true)) return
             try {
                 binder.unlinkToDeath(connection.deathRecipient, 0)

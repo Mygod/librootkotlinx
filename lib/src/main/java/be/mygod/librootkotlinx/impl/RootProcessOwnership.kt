@@ -76,10 +76,7 @@ internal class RootProcessOwnership : Closeable {
     }
 
     companion object {
-        const val SOCKET_ENV = "LIBROOTKOTLINX_OWNERSHIP_SOCKET"
-
-        fun connectFromRootProcess(): LocalSocket = try {
-            val socketName = System.getenv(SOCKET_ENV) ?: throw IllegalStateException("$SOCKET_ENV is not set")
+        fun connectFromRootProcess(socketName: String): LocalSocket = try {
             val socket = LocalSocket()
             try {
                 socket.connect(LocalSocketAddress(socketName))

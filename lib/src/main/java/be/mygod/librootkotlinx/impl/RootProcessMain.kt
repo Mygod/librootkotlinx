@@ -13,12 +13,8 @@ import be.mygod.librootkotlinx.systemContext
  */
 internal object RootProcessMain {
     @JvmStatic
-    fun main(context: Context, userId: Int) {
+    fun main(context: Context, userId: Int, authority: String, token: String) {
         systemContext = context
-        val authority = System.getenv(RootServiceHandoff.AUTHORITY_ENV)
-            ?: throw IllegalStateException("${RootServiceHandoff.AUTHORITY_ENV} is not set")
-        val token = System.getenv(RootServiceHandoff.TOKEN_ENV)
-            ?: throw IllegalStateException("${RootServiceHandoff.TOKEN_ENV} is not set")
         val service = RootCommandService(Looper.myLooper()!!::quitSafely)
         if (!RootServiceHandoffClient.handoff(context, authority, token, service.asBinder(), userId)) {
             throw IllegalStateException("Root service handoff rejected")

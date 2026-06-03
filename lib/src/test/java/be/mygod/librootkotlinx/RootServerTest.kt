@@ -335,11 +335,16 @@ class RootServerTest {
 
     private suspend fun RootServer.cleanup() = callSuspend("cleanup")
 
-    private suspend fun RootServer.handleEvent(event: Any) = callSuspend(
-        "handleEvent",
-        arrayOf(Class.forName("${RootServer::class.java.name}\$Event")),
-        event,
-    )
+    private fun RootServer.handleEvent(event: Any) {
+        val method = javaClass.getDeclaredMethod(
+            "handleEvent", Class.forName("${RootServer::class.java.name}\$Event"),
+        ).apply { isAccessible = true }
+        try {
+            method.invoke(this, event)
+        } catch (e: InvocationTargetException) {
+            throw checkNotNull(e.cause)
+        }
+    }
 
     private companion object {
         val unsafe: Unsafe = Unsafe::class.java.getDeclaredField("theUnsafe").let {

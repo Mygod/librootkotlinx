@@ -71,7 +71,12 @@ class RootServer internal constructor() {
     // Session-scoped callback: multiplex by id to avoid leaking per-command Binder callback refs.
     private val callback = object : IRootCommandCallback.Stub(), IBinder.DeathRecipient {
         override fun onResponse(id: Long, response: RootCommandResponse) {
-            handleResponse(id, response)
+            val handling = synchronized(lifecycleLock) {
+                if (closeCause == null) {
+                    commandCallbacks.handleResponse(id, response)
+                } else RootCommandResponseHandling.Done
+            }
+            if (handling == RootCommandResponseHandling.CancelRemote) cancelRemoteSubmitted(id)?.let(::requestClose)
         }
 
         override fun binderDied() {
@@ -233,65 +238,48 @@ class RootServer internal constructor() {
         }
     }
 
-    @OptIn(DelicateCoroutinesApi::class)
-    private suspend fun handleEvent(event: Event) {
+    private fun handleEvent(event: Event) {
         when (event) {
-            is Event.Connected -> handleConnected(event)
+            is Event.Connected -> {
+                val service = event.service
+                if (connected == null && closeCause == null) {
+                    connected = service
+                    if (pendingConnection === service.connection) pendingConnection = null
+                    rootServiceConnected.complete()
+                    started.complete(Unit)
+                } else service.close("after cancelled bind")
+            }
             is Event.StartupFailed -> if (connected == null) {
                 if (pendingConnection === event.connection) event.connection.markStartupFailed()
                 recordCloseCause(event.cause)
             }
-            is Event.SendCommand -> sendCommand(event)
-            is Event.CancelRemote -> cancelRemoteOwned(event.id, event.callback)?.let(::recordCloseCause)
+            is Event.SendCommand -> {
+                val remote = connected?.service
+                if (remote == null) {
+                    event.result.completeExceptionally(unavailableCause())
+                    return
+                }
+                val registered = try {
+                    commandCallbacks.register(event.factory)
+                } catch (e: Throwable) {
+                    event.result.completeExceptionally(e)
+                    return
+                }
+                try {
+                    remote.execute(registered.id, RootCommandRequest(event.command), callback)
+                    Logger.me.d("Sent #${registered.id}: ${event.command}")
+                    event.result.complete(registered)
+                } catch (e: Throwable) {
+                    commandCallbacks.unregister(registered.id, registered.callback)
+                    registered.callback.close(e)
+                    event.result.completeExceptionally(e)
+                    if (e is RemoteException) recordCloseCause(e)
+                }
+            }
+            is Event.CancelRemote -> if (commandCallbacks.unregister(event.id, event.callback)) {
+                cancelRemoteSubmitted(event.id)?.let(::recordCloseCause)
+            }
         }
-    }
-
-    private suspend fun handleConnected(event: Event.Connected) {
-        val service = event.service
-        if (connected == null && closeCause == null) {
-            connected = service
-            if (pendingConnection === service.connection) pendingConnection = null
-            rootServiceConnected.complete()
-            started.complete(Unit)
-        } else {
-            service.close("after cancelled bind")
-        }
-    }
-
-    private fun handleResponse(id: Long, response: RootCommandResponse) {
-        val handling = synchronized(lifecycleLock) {
-            if (closeCause == null) commandCallbacks.handleResponse(id, response) else RootCommandResponseHandling.Done
-        }
-        if (handling == RootCommandResponseHandling.CancelRemote) cancelRemoteSubmitted(id)?.let(::requestClose)
-    }
-
-    private fun sendCommand(event: Event.SendCommand) {
-        val remote = connected?.service
-        if (remote == null) {
-            event.result.completeExceptionally(unavailableCause())
-            return
-        }
-        val registered = try {
-            commandCallbacks.register(event.factory)
-        } catch (e: Throwable) {
-            event.result.completeExceptionally(e)
-            return
-        }
-        try {
-            remote.execute(registered.id, RootCommandRequest(event.command), callback)
-            Logger.me.d("Sent #${registered.id}: ${event.command}")
-            event.result.complete(registered)
-        } catch (e: Throwable) {
-            commandCallbacks.unregister(registered.id, registered.callback)
-            registered.callback.close(e)
-            event.result.completeExceptionally(e)
-            if (e is RemoteException) recordCloseCause(e)
-        }
-    }
-
-    private fun cancelRemoteOwned(id: Long, commandCallback: RootCommandCallback? = null): RemoteException? {
-        if (!commandCallbacks.unregister(id, commandCallback)) return null
-        return cancelRemoteSubmitted(id)
     }
 
     private fun cancelRemoteSubmitted(id: Long): RemoteException? {
@@ -365,7 +353,7 @@ class RootServer internal constructor() {
         factory: (Long) -> RootCommandCallback,
     ): RegisteredRootCommandCallback {
         val result = CompletableDeferred<RegisteredRootCommandCallback>()
-        if (!trySendClientEvent(Event.SendCommand(command, factory, result))) throw unavailableCause()
+        if (!active || !trySendEvent(Event.SendCommand(command, factory, result))) throw unavailableCause()
         // After the event is accepted, cancellation must wait for the id needed to cancel remote work.
         return withContext(NonCancellable) { result.await() }
     }
@@ -373,8 +361,6 @@ class RootServer internal constructor() {
     private fun cancelRemote(id: Long, commandCallback: RootCommandCallback? = null) {
         trySendEvent(Event.CancelRemote(id, commandCallback))
     }
-
-    private fun trySendClientEvent(event: Event) = active && trySendEvent(event)
 
     private fun trySendEvent(event: Event) = events.trySend(event).isSuccess
 

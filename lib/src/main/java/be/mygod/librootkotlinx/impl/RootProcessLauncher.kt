@@ -54,7 +54,7 @@ internal class RootProcessLauncher(
                 ownershipSocketName = ownershipSocketName,
                 handoffAuthority = handoffAuthority,
                 handoffToken = handoffToken,
-                appProcess = RootProcessAppProcess.myExe,
+                appProcess = AppProcess.myExe,
                 shouldRelocate = Build.VERSION.SDK_INT < 26,
                 relocationToken = if (Build.VERSION.SDK_INT < 26) relocationToken() else "",
             ),
@@ -90,10 +90,10 @@ internal class RootProcessLauncher(
                                 when (line) {
                                     STARTUP_MARKER_STARTED -> startupComplete = true
                                     null -> throw NoShellException(
-                                        "Root service startup marker pipe closed${diagnosticsSuffix()}",
+                                        "Root shell marker pipe closed${diagnosticsSuffix()}",
                                     )
                                     else -> throw NoShellException(
-                                        "Unexpected root service startup marker: $line${diagnosticsSuffix()}",
+                                        "Unexpected root shell startup marker: $line${diagnosticsSuffix()}",
                                     )
                                 }
                             }
@@ -101,15 +101,12 @@ internal class RootProcessLauncher(
                                 pipes.closeMarkerWrite()
                                 when (val line = marker.await()) {
                                     STARTUP_MARKER_STARTED -> startupComplete = true
-                                    null -> {
-                                        val exitCode = rootShell.awaitExit()
-                                        throw NoShellException(
-                                            "Root shell exited before root service startup with exit code $exitCode${
-                                                diagnosticsSuffix()}",
-                                        ).also { failure -> drainFailures.forEach(failure::addSuppressed) }
-                                    }
+                                    null -> throw NoShellException("Root shell exited unexpectedly with code ${
+                                        rootShell.awaitExit()}${diagnosticsSuffix()}").also { failure ->
+                                            drainFailures.forEach(failure::addSuppressed)
+                                        }
                                     else -> throw NoShellException(
-                                        "Unexpected root service startup marker: $line${diagnosticsSuffix()}",
+                                        "Unexpected root shell startup marker: $line${diagnosticsSuffix()}",
                                     ).also { failure -> drainFailures.forEach(failure::addSuppressed) }
                                 }
                             }
@@ -137,41 +134,33 @@ internal class RootProcessLauncher(
         }
     }
 
-    private suspend fun ByteReadChannel.drainStartupDiagnostics(diagnostics: StringBuilder): IOException? {
-        return try {
-            useLines { line ->
-                synchronized(diagnostics) {
-                    diagnostics.appendLine(line)
-                    if (diagnostics.length > MAX_STARTUP_DIAGNOSTICS_LENGTH) {
-                        diagnostics.delete(0, diagnostics.length - MAX_STARTUP_DIAGNOSTICS_LENGTH)
-                    }
+    private suspend fun ByteReadChannel.drainStartupDiagnostics(diagnostics: StringBuilder) = try {
+        useLines { line ->
+            synchronized(diagnostics) {
+                diagnostics.appendLine(line)
+                if (diagnostics.length > MAX_STARTUP_DIAGNOSTICS_LENGTH) {
+                    diagnostics.delete(0, diagnostics.length - MAX_STARTUP_DIAGNOSTICS_LENGTH)
                 }
             }
-            null
-        } catch (e: IOException) {
-            e
         }
+        null
+    } catch (e: IOException) {
+        e
     }
 
     private suspend fun executeRootShell(command: String): ProcessPipes {
         val process = startRootShell()
         var input: ByteWriteChannel? = null
         try {
-            val channel = checkNotNull(process.stdin) { "Root shell stdin pipe was not requested" }
+            input = checkNotNull(process.stdin) { "Root shell stdin pipe was not requested" }
                 .openWriteChannel(Handler(Looper.getMainLooper()))
-            input = channel
-            channel.writeFully(command.encodeToByteArray())
-            channel.flushAndClose()
+            input.writeFully(command.encodeToByteArray())
+            input.flushAndClose()
             return process
         } catch (e: IOException) {
             input?.cancel(e)
             process.close()
             throw NoShellException("Root shell died before root service startup", e)
-        } catch (e: InterruptedException) {
-            input?.cancel(e)
-            process.close()
-            Thread.currentThread().interrupt()
-            throw e
         } catch (e: Throwable) {
             input?.cancel(e)
             process.close()
@@ -186,7 +175,7 @@ internal class RootProcessLauncher(
         } catch (e: IOException) {
             failure?.addSuppressed(e) ?: run { failure = e }
         }
-        throw NoShellException("Root shell is not available", checkNotNull(failure))
+        throw NoShellException("Root shell is not available", failure!!)
     }
 
     private fun relocationToken(): String {
@@ -213,7 +202,7 @@ internal class RootProcessLauncher(
             "su",
         )
         private const val STARTUP_MARKER_STARTED = "librootkotlinx-started"
-        private const val MAX_STARTUP_DIAGNOSTICS_LENGTH = 8192
+        private const val MAX_STARTUP_DIAGNOSTICS_LENGTH = 1024 * 1024
 
         fun buildStartupCommand(
             packageName: String,
@@ -231,10 +220,10 @@ internal class RootProcessLauncher(
             relocationToken: String,
         ): String {
             val (relocationScript, executable) = if (shouldRelocate) {
-                RootProcessAppProcess.relocateScript(relocationToken)
+                AppProcess.relocateScript(relocationToken)
             } else "" to appProcess
             val userId = android.os.Process.myUid() / 100000    // PER_USER_RANGE
-            val launch = RootProcessAppProcess.launchString(
+            val launch = AppProcess.launchString(
                 packageCodePath = packageCodePath,
                 clazz = RootProcessBootstrap::class.java.name,
                 appProcess = executable,
@@ -246,12 +235,10 @@ internal class RootProcessLauncher(
                 appendLine("exec 5>$stdoutPath || exit 1")
                 appendLine("exec 6>$stderrPath || exit 1")
                 append(relocationScript)
-                appendLine("printf '%s\\n' ${ShellScript.quote(STARTUP_MARKER_STARTED)} >&3 || exit 1")
+                appendLine("printf '%s\\n' $STARTUP_MARKER_STARTED >&3 || exit 1")
                 appendLine("exec 3>&-")
-                appendLine("${RootServiceHandoff.AUTHORITY_ENV}=${ShellScript.quote(handoffAuthority)} ${
-                    RootServiceHandoff.TOKEN_ENV}=${ShellScript.quote(handoffToken)} ${
-                    RootProcessOwnership.SOCKET_ENV}=${ShellScript.quote(ownershipSocketName)} $launch ${
-                    ShellScript.quote(packageName)} $userId <&4 >&5 2>&6 4<&- 5>&- 6>&-")
+                appendLine("$launch $packageName $userId $ownershipSocketName $handoffAuthority ${
+                    handoffToken} <&4 >&5 2>&6 4<&- 5>&- 6>&-")
             }
         }
     }

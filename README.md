@@ -16,26 +16,25 @@ Use it now!
 ## Features
 
 * 100% Kotlin public API with coroutines and `Parcelize`! Easy to use and virtually no boilerplate code/aidl
-* 100% event driven via coroutines, no blocking calls after the root app process is launched
+* 100% event driven via coroutines, no blocking calls
 * Persistent root session that closes itself on inactive (optional and configurable)
 * Supports `IBinder` and `ParcelFileDescriptor` passing via a Binder IPC backend
 
 ## Comparison with [libsu](https://github.com/topjohnwu/libsu)
 
-librootkotlinx is inspired by libsu's RootService backend.
-It keeps this library's coroutine-oriented `RootCommand` and `RootSession` API, starts an owned root `app_process`,
-and hands the root command-service Binder directly to the app through an internal direct-boot-aware provider.
+librootkotlinx is inspired by and heavily borrows libsu's RootService backend design.
 
-* librootkotlinx supports only API 23+ instead of 19+ for libsu.
+* librootkotlinx supports only API 23+ for nonblocking IO instead of 19+ for libsu.
 * librootkotlinx exposes suspend functions and Kotlin Flow instead of requiring consumers to write AIDL.
-* librootkotlinx uses content provider for Binder handoff, which is more robust and less prone to system broadcast pressure than libsu's broadcast path.
+* librootkotlinx uses content provider for Binder handoff, which is more robust and less prone to system broadcast pressure than libsu's broadcast path, and more lightweight and more secure compared to libsu's daemon service path.
 * librootkotlinx supports more robust error surfacing, handling and recovery.
   In contrast, libsu quietly swallows Exceptions/failures, does not support app-provided logger, and may block retry until the entire process is restarted.
 * librootkotlinx is cancellation aware whereas libsu provides no such path and has a fixed non-negotiable 10-second timeout as a workaround.
 * librootkotlinx does not provide a root shell API and thus does not need to keep an unused root shell process hanging around.
-* librootkotlinx avoids blocking I/O as much as possible.
+* librootkotlinx is coroutine/Ktor-first and uses no blocking I/O.
+* librootkotlinx uses Linux local socket to guarantee server death once the client process is gone, which is more reliable than Android APIs used by libsu. 
 * librootkotlinx is strict one client to one server. Multiple client processes/users are unsupported.
-* libsu has additional APIs such as shell helpers and remote file system support; librootkotlinx intentionally keeps those outside its public API.
+* libsu has additional APIs such as shell helpers and remote file system support.
 
 ## Private APIs used / Assumptions for Android customizations
 
@@ -73,7 +72,6 @@ Greylisted/blacklisted APIs or internal constants: (some constants are hardcoded
 <summary>Hidden whitelisted APIs: (same catch as above, however, things in this list are less likely to be broken)</summary>
 
 * `Landroid/app/ContextImpl;->createPackageContextAsUser(Ljava/lang/String;ILandroid/os/UserHandle;)Landroid/content/Context;,sdk,system-api,test-api`
-* (API 31+) `Landroid/content/AttributionSource;->myAttributionSource()Landroid/content/AttributionSource;,public-api,sdk,system-api,test-api`
 * `Landroid/content/Context;->createPackageContextAsUser(Ljava/lang/String;ILandroid/os/UserHandle;)Landroid/content/Context;,sdk,system-api,test-api`
 * (API 24+) `Landroid/os/UserHandle;->of(I)Landroid/os/UserHandle;,sdk,system-api,test-api`
 

@@ -11,5 +11,5 @@
 -keep,allowobfuscation class be.mygod.librootkotlinx.impl.RootProcessMain
 -if class be.mygod.librootkotlinx.impl.RootProcessLauncher
 -keepclassmembers class be.mygod.librootkotlinx.impl.RootProcessMain {
-    public static void main(android.content.Context, int);
+    public static void main(android.content.Context, int, java.lang.String, java.lang.String);
 }

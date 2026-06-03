@@ -1,6 +1,7 @@
 package be.mygod.librootkotlinx.impl
 
 import android.annotation.SuppressLint
+import android.content.AttributionSource
 import android.content.Context
 import android.os.Binder
 import android.os.Build
@@ -52,7 +53,7 @@ internal object RootServiceHandoffClient {
                 putString(RootServiceHandoff.EXTRA_TOKEN, token)
                 putBinder(RootServiceHandoff.EXTRA_BINDER, serviceBinder)
             }
-            val result = IContentProvider.compat(provider).call(
+            val result = IContentProvider.compat.call(provider,
                 context.packageName, RootServiceHandoff.METHOD, authority, extras)
             val accepted = result?.getBoolean(RootServiceHandoff.EXTRA_ACCEPTED, false) == true
             if (!accepted) {
@@ -127,15 +128,15 @@ internal object RootServiceHandoffClient {
         }
     }
 
-    sealed class IContentProvider(protected val provider: Any) {
-        abstract fun call(callingPackage: String, method: String, authority: String, extras: Bundle): Bundle?
+    sealed class IContentProvider {
+        abstract fun call(provider: Any, callingPackage: String, method: String, authority: String, extras: Bundle): Bundle?
 
         companion object {
-            fun compat(provider: Any) = when {
-                Build.VERSION.SDK_INT >= 31 -> Api31(provider)
-                Build.VERSION.SDK_INT >= 30 -> Api30(provider)
-                Build.VERSION.SDK_INT >= 29 -> Api29(provider)
-                else -> Api21(provider)
+            val compat get() = when {
+                Build.VERSION.SDK_INT >= 31 -> Api31
+                Build.VERSION.SDK_INT >= 30 -> Api30
+                Build.VERSION.SDK_INT >= 29 -> Api29
+                else -> Api21
             }
 
             private val clazz by lazy { Class.forName("android.content.IContentProvider") }
@@ -143,48 +144,47 @@ internal object RootServiceHandoffClient {
 
         // API 21-28 exposes only the pre-authority overload.
         // https://android.googlesource.com/platform/frameworks/base/+/android-5.0.0_r1/core/java/android/content/IContentProvider.java#58
-        class Api21(provider: Any) : IContentProvider(provider) {
+        object Api21 : IContentProvider() {
             private val call by lazy {
                 clazz.getDeclaredMethod("call", String::class.java, String::class.java, String::class.java,
                     Bundle::class.java)
             }
-            override fun call(callingPackage: String, method: String, authority: String, extras: Bundle) =
+            override fun call(provider: Any, callingPackage: String, method: String, authority: String, extras: Bundle) =
                 call(provider, callingPackage, method, null, extras) as Bundle?
         }
 
         // Android 10 validates authority before dispatching ContentProvider.call.
         // https://android.googlesource.com/platform/frameworks/base/+/android-10.0.0_r1/core/java/android/content/IContentProvider.java#82
-        class Api29(provider: Any) : IContentProvider(provider) {
+        object Api29 : IContentProvider() {
             private val call by lazy {
                 clazz.getDeclaredMethod("call", String::class.java, String::class.java, String::class.java,
                     String::class.java, Bundle::class.java)
             }
-            override fun call(callingPackage: String, method: String, authority: String, extras: Bundle) =
+            override fun call(provider: Any, callingPackage: String, method: String, authority: String, extras: Bundle) =
                 call(provider, callingPackage, authority, method, null, extras) as Bundle?
         }
 
         // Android 11 requires the overload carrying attributionTag and authority.
         // https://android.googlesource.com/platform/frameworks/base/+/android-11.0.0_r1/core/java/android/content/IContentProvider.java#118
-        class Api30(provider: Any) : IContentProvider(provider) {
+        object Api30 : IContentProvider() {
             private val call by lazy {
                 clazz.getDeclaredMethod("call", String::class.java, String::class.java, String::class.java,
                     String::class.java, String::class.java, Bundle::class.java)
             }
-            override fun call(callingPackage: String, method: String, authority: String, extras: Bundle) =
+            override fun call(provider: Any, callingPackage: String, method: String, authority: String, extras: Bundle) =
                 call(provider, callingPackage, null, authority, method, null, extras) as Bundle?
         }
 
         // Android 12+ IContentProvider.call requires AttributionSource.
         // https://android.googlesource.com/platform/frameworks/base/+/android-12.0.0_r1/core/java/android/content/IContentProvider.java#123
-        class Api31(provider: Any) : IContentProvider(provider) {
-            private val classAttributionSource by lazy { Class.forName("android.content.AttributionSource") }
+        @SuppressLint("NewApi")
+        object Api31 : IContentProvider() {
             private val call by lazy {
-                clazz.getDeclaredMethod("call", classAttributionSource, String::class.java, String::class.java,
+                clazz.getDeclaredMethod("call", AttributionSource::class.java, String::class.java, String::class.java,
                     String::class.java, Bundle::class.java)
             }
-            private val myAttributionSource by lazy { classAttributionSource.getDeclaredMethod("myAttributionSource") }
-            override fun call(callingPackage: String, method: String, authority: String, extras: Bundle) =
-                call(provider, myAttributionSource(null), authority, method, null, extras) as Bundle?
+            override fun call(provider: Any, callingPackage: String, method: String, authority: String, extras: Bundle) =
+                call(provider, AttributionSource.myAttributionSource(), authority, method, null, extras) as Bundle?
         }
     }
 }

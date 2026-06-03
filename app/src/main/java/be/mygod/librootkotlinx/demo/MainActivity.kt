@@ -38,22 +38,15 @@ class MainActivity : ComponentActivity() {
         override suspend fun execute() = ParcelableString("context: ${systemContext.packageName}\nuid: ${
             Jni.getuid()}\n" + coroutineScope {
             // Try to execute a restricted subprocess command.
-            ProcessBuilder("/system/bin/iptables", "-L", "INPUT").startPipes().use { process ->
+            ProcessBuilder("/system/bin/iptables", "-L", "INPUT").startPipes(false).use { process ->
                 val handler = Handler(Looper.getMainLooper())
-                var stdin: ByteWriteChannel? = null
                 var stdout: FileDescriptorByteReadChannel? = null
                 var stderr: FileDescriptorByteReadChannel? = null
                 try {
-                    val stdinChannel = checkNotNull(process.stdin) { "Process stdin pipe was not requested" }
-                        .openWriteChannel(handler)
-                    stdin = stdinChannel
-                    val stdoutChannel = checkNotNull(process.stdout) { "Process stdout pipe was not requested" }
-                        .openReadChannel(handler)
+                    val stdoutChannel = process.stdout!!.openReadChannel(handler)
                     stdout = stdoutChannel
-                    val stderrChannel = checkNotNull(process.stderr) { "Process stderr pipe was not requested" }
-                        .openReadChannel(handler)
+                    val stderrChannel = process.stderr!!.openReadChannel(handler)
                     stderr = stderrChannel
-                    stdinChannel.flushAndClose()
                     val stdoutText = async { stdoutChannel.readRemaining().readText() }
                     val stderrText = async { stderrChannel.readRemaining().readText() }
                     var output = stdoutText.await() + stderrText.await()
@@ -63,7 +56,6 @@ class MainActivity : ComponentActivity() {
                     }
                     output
                 } finally {
-                    stdin?.cancel(null)
                     stdout?.cancel(null)
                     stderr?.cancel(null)
                 }
@@ -124,7 +116,7 @@ class MainActivity : ComponentActivity() {
                         .readText()
                     val binder = object : Binder() {
                         override fun onTransact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean {
-                            if (code == IBinder.FIRST_CALL_TRANSACTION) {
+                            if (code == FIRST_CALL_TRANSACTION) {
                                 reply?.writeInt(Binder.getCallingUid())
                                 return true
                             }

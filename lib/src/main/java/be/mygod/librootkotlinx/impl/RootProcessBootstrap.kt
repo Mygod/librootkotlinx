@@ -21,12 +21,13 @@ import kotlin.system.exitProcess
 internal object RootProcessBootstrap {
     @JvmStatic
     fun main(args: Array<String>) {
-        if (args.size < 2) {
-            System.err.println("RootProcessBootstrap requires package, uid, and runtime class arguments")
+        if (args.size < 5) {
+            System.err.println(
+                "RootProcessBootstrap requires package, uid, ownership socket, handoff authority and token arguments")
             System.err.flush()
             exitProcess(1)
         }
-        val ownership = RootProcessOwnership.connectFromRootProcess()
+        val ownership = RootProcessOwnership.connectFromRootProcess(args[2])
         @Suppress("DEPRECATION") Looper.prepareMainLooper()
         val processJob = SupervisorJob()
         val processScope = CoroutineScope(processJob + Dispatchers.Main.immediate)
@@ -41,7 +42,8 @@ internal object RootProcessBootstrap {
             // AOSP: https://android.googlesource.com/platform/frameworks/base/+/1cdfff555f4a21f71ccc978290e2e212e2f8b168/core/java/android/app/LoadedApk.java#1218
             Thread.currentThread().contextClassLoader = classLoader
             classLoader.loadClass(RootProcessMain::class.java.name).getDeclaredMethod("main",
-                Context::class.java, Int::class.javaPrimitiveType)(null, context, userId)
+                Context::class.java, Int::class.javaPrimitiveType, String::class.java, String::class.java)(null,
+                context, userId, args[3], args[4])
         } finally {
             processJob.cancel()
         }

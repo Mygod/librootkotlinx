@@ -67,15 +67,15 @@ class ProcessPipes internal constructor(
                 // AOSP libcore has these redirect methods from android-7.0.0_r1, but SDK metadata marks them API 26.
                 if (stdin) {
                     stdinPipe = ParcelFileDescriptor.createPipe()
-                    @SuppressLint("NewApi") redirectInput(fdFile(stdinPipe[0]))
+                    @SuppressLint("NewApi") redirectInput(File(fdPath(stdinPipe[0])))
                 }
                 if (stdout) {
                     stdoutPipe = ParcelFileDescriptor.createPipe()
-                    @SuppressLint("NewApi") redirectOutput(fdFile(stdoutPipe[1]))
+                    @SuppressLint("NewApi") redirectOutput(File(fdPath(stdoutPipe[1])))
                 }
                 if (stderr) {
                     stderrPipe = ParcelFileDescriptor.createPipe()
-                    @SuppressLint("NewApi") redirectError(fdFile(stderrPipe[1]))
+                    @SuppressLint("NewApi") redirectError(File(fdPath(stderrPipe[1])))
                 }
                 process = start()
                 stdinPipe?.get(0)?.close()
@@ -117,8 +117,8 @@ class ProcessPipes internal constructor(
             }
         }
 
-        private fun fdFile(descriptor: ParcelFileDescriptor) = File("/proc/${android.os.Process.myPid()}/fd/${
-            descriptor.fd}")
+        internal fun fdPath(descriptor: ParcelFileDescriptor) = "/proc/${android.os.Process.myPid()}/fd/${
+            descriptor.fd}"
 
         private val processInputStreamFd by lazy {
             Class.forName("java.lang.ProcessManager\$ProcessInputStream").getDeclaredField("fd")
