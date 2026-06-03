@@ -3,10 +3,9 @@ package be.mygod.librootkotlinx.impl
 import android.os.Handler
 import android.os.Looper
 import android.os.ParcelFileDescriptor
-import android.os.Process
 import be.mygod.librootkotlinx.Logger
+import be.mygod.librootkotlinx.io.fdPath
 import be.mygod.librootkotlinx.io.openReadChannel
-import com.topjohnwu.superuser.ShellUtils
 import java.io.Closeable
 import java.io.IOException
 
@@ -32,10 +31,10 @@ internal class RootProcessPipes {
     private var markerRead: ParcelFileDescriptor?
     private var markerWrite: ParcelFileDescriptor?
 
-    val redirect get() = " <${fdPath(checkNotNull(stdinRead))}" +
-            " >${fdPath(checkNotNull(stdoutWrite))}" +
-            " 2>${fdPath(checkNotNull(stderrWrite))}"
-    val markerRedirect get() = fdPath(checkNotNull(markerWrite))
+    val stdinPath get() = fdPath(checkNotNull(stdinRead))
+    val stdoutPath get() = fdPath(checkNotNull(stdoutWrite))
+    val stderrPath get() = fdPath(checkNotNull(stderrWrite))
+    val markerPath get() = fdPath(checkNotNull(markerWrite))
 
     init {
         val stdin = ParcelFileDescriptor.createPipe()
@@ -87,12 +86,6 @@ internal class RootProcessPipes {
         stderrWrite = null
         markerRead = null
         markerWrite = null
-    }
-
-    companion object {
-        internal fun appFdPath(fd: Int, pid: Int = Process.myPid()) = ShellUtils.escapedString("/proc/$pid/fd/$fd")
-
-        private fun fdPath(descriptor: ParcelFileDescriptor) = appFdPath(descriptor.fd)
     }
 }
 

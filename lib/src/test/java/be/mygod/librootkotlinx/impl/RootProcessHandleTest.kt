@@ -11,7 +11,6 @@ import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertSame
 import org.junit.Assert.fail
 import org.junit.Test
 import java.io.IOException
@@ -19,71 +18,99 @@ import java.io.IOException
 @OptIn(ExperimentalCoroutinesApi::class)
 class RootProcessHandleTest {
     @Test
-    fun rootIoExitBeforeConnectionFailsStartupWhileActive() = runTest {
+    fun startupStdioClosedBeforeOwnershipFailsStartup() = runTest {
         supervisorScope {
-            val rootIoFailure = IOException("stdio closed")
-            val handlerCompletion = CompletableDeferred<Throwable?>()
-            val startup = async { RootProcessHandle.awaitRootServiceConnected(Job(), handlerCompletion) }
+            val ownershipAccepted = CompletableDeferred<Unit>()
+            val startupStdioClosed = CompletableDeferred<Unit>()
+            val startup = async {
+                RootProcessHandle.awaitRootStartup(Job(), ownershipAccepted, startupStdioClosed) { 9 }
+            }
 
             runCurrent()
-            handlerCompletion.complete(rootIoFailure)
+            startupStdioClosed.complete(Unit)
 
-            val thrown = awaitRootIoExit(startup)
-            assertSame(rootIoFailure, thrown.rootIoCause())
+            assertEquals(
+                "Root process stdout/stderr closed before ownership accepted with exit code 9",
+                awaitIOException(startup).message,
+            )
         }
     }
 
     @Test
-    fun activeRootIoCancellationBeforeConnectionStillFailsStartup() = runTest {
+    fun startupStdioClosedBeforeConnectionFailsStartup() = runTest {
         supervisorScope {
-            val rootIoCancellation = CancellationException("handler stopped")
-            val handlerCompletion = CompletableDeferred<Throwable?>()
-            val startup = async { RootProcessHandle.awaitRootServiceConnected(Job(), handlerCompletion) }
+            val ownershipAccepted = CompletableDeferred<Unit>()
+            val startupStdioClosed = CompletableDeferred<Unit>()
+            val startup = async {
+                RootProcessHandle.awaitRootStartup(Job(), ownershipAccepted, startupStdioClosed) { 7 }
+            }
 
+            ownershipAccepted.complete(Unit)
             runCurrent()
-            handlerCompletion.complete(rootIoCancellation)
+            startupStdioClosed.complete(Unit)
 
-            val thrown = awaitRootIoExit(startup)
-            assertSame(rootIoCancellation, thrown.rootIoCause())
+            assertEquals(
+                "Root process stdout/stderr closed before root service connected with exit code 7",
+                awaitIOException(startup).message,
+            )
         }
     }
 
     @Test
-    fun cancelledRootIoHandlerBeforeConnectionPreservesCancellation() = runTest {
+    fun connectionCompletingAfterOwnershipCompletesStartup() = runTest {
         supervisorScope {
-            val rootIoCancellation = CancellationException("startup owner closed")
-            val handlerCompletion = CompletableDeferred<Throwable?>()
-            val startup = async { RootProcessHandle.awaitRootServiceConnected(Job(), handlerCompletion) }
+            val rootServiceConnected = Job()
+            val ownershipAccepted = CompletableDeferred<Unit>()
+            val startupStdioClosed = CompletableDeferred<Unit>()
+            var awaitFailureExitCalls = 0
+            val startup = async {
+                RootProcessHandle.awaitRootStartup(rootServiceConnected, ownershipAccepted, startupStdioClosed) {
+                    ++awaitFailureExitCalls
+                }
+            }
 
+            ownershipAccepted.complete(Unit)
             runCurrent()
-            handlerCompletion.cancel(rootIoCancellation)
+            rootServiceConnected.complete()
 
-            assertSame(rootIoCancellation, awaitCancellation(startup).unwrap())
+            startup.await()
+            assertEquals(0, awaitFailureExitCalls)
         }
     }
 
-    private suspend fun awaitRootIoExit(startup: Deferred<Unit>) = try {
+    @Test
+    fun cancelledConnectionCancelsStartupAfterOwnership() = runTest {
+        supervisorScope {
+            val rootServiceConnected = Job().also { it.cancel(CancellationException("server closed")) }
+            val ownershipAccepted = CompletableDeferred<Unit>()
+            val startupStdioClosed = CompletableDeferred<Unit>()
+            var awaitFailureExitCalls = 0
+            val startup = async {
+                RootProcessHandle.awaitRootStartup(rootServiceConnected, ownershipAccepted, startupStdioClosed) {
+                    ++awaitFailureExitCalls
+                }
+            }
+
+            ownershipAccepted.complete(Unit)
+
+            assertEquals("server closed", awaitCancellation(startup).message)
+            assertEquals(0, awaitFailureExitCalls)
+        }
+    }
+
+    private suspend fun awaitIOException(startup: Deferred<Unit>) = try {
         startup.await()
-        throw AssertionError("Expected root IO startup failure")
+        fail("Expected startup failure")
+        throw AssertionError()
     } catch (e: IOException) {
-        assertEquals(ROOT_IO_EXIT_MESSAGE, e.message)
         e
     }
 
-    private suspend fun awaitCancellation(startup: Deferred<Unit>) = try {
+    private suspend fun awaitCancellation(startup: Deferred<Unit>): CancellationException = try {
         startup.await()
         fail("Expected startup cancellation")
         throw AssertionError()
     } catch (e: CancellationException) {
         e
-    }
-
-    private fun CancellationException.unwrap(): CancellationException = cause as? CancellationException ?: this
-
-    private fun IOException.rootIoCause(): Throwable? =
-        (cause as? IOException)?.takeIf { it.message == ROOT_IO_EXIT_MESSAGE }?.cause ?: cause
-
-    private companion object {
-        const val ROOT_IO_EXIT_MESSAGE = "Root IO handling completed before root service connected"
     }
 }

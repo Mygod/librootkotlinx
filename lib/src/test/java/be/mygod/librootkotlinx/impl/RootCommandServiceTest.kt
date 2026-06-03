@@ -53,6 +53,18 @@ class RootCommandServiceTest {
         assertEquals(RootCommandResponse.EX_THROWABLE, response.status)
     }
 
+    @Test
+    fun fatalCallbackFailureStopsRootProcess() = runTest {
+        val stopped = CompletableDeferred<Unit>()
+        val service = RootCommandService(stopRootProcess = { stopped.complete(Unit) })
+        val callback = AlwaysFailingResponseCallback()
+
+        service.binder().execute(7, RootCommandRequest(FailingCommand), callback)
+        stopped.await()
+
+        assertEquals(2, callback.responseCalls)
+    }
+
     private class FailingFirstResponseCallback(private val firstFailure: Throwable) : IRootCommandCallback.Default() {
         val fallbackResponse = CompletableDeferred<RootCommandResponse>()
         var responseCalls = 0
@@ -63,6 +75,17 @@ class RootCommandServiceTest {
             responseId = id
             if (responseCalls == 1) throw firstFailure
             fallbackResponse.complete(response)
+        }
+
+        override fun asBinder(): IBinder? = null
+    }
+
+    private class AlwaysFailingResponseCallback : IRootCommandCallback.Default() {
+        var responseCalls = 0
+
+        override fun onResponse(id: Long, response: RootCommandResponse) {
+            ++responseCalls
+            throw RemoteException("callback unavailable")
         }
 
         override fun asBinder(): IBinder? = null

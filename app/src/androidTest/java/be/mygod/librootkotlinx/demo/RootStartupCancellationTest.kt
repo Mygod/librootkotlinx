@@ -22,6 +22,9 @@ class RootStartupCancellationTest {
         try {
             val output = waitForRootOutput(instrumentation, second.findViewById(android.R.id.text1))
             assertTrue(output, output.contains("uid: 0"))
+            assertTrue(output, output.contains("Hello, World"))
+            assertTrue(output, output.contains("fd uid: 0"))
+            assertTrue(output, output.contains("binder caller uid: 0"))
         } finally {
             second.finishOnMain(instrumentation)
         }
@@ -54,5 +57,5 @@ class RootStartupCancellationTest {
         return result
     }
 
-    private fun String.isNoRootFailure() = contains("NoShellException") || contains("Root shell is not available")
+    private fun String.isNoRootFailure() = contains("Root shell is not available")
 }

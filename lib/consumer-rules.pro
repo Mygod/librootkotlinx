@@ -1,14 +1,15 @@
-# RootProcessLauncher swaps libsu's generated RootServerMain command for our stdio-preserving entry point.
--if class be.mygod.librootkotlinx.impl.libsu.RootProcessLauncher
--keep class be.mygod.librootkotlinx.impl.libsu.RootProcessMain {
+# RootProcessLauncher names RootProcessBootstrap on the root app_process command line, then Bootstrap reflectively calls
+# RootProcessMain after the framework creates the package class loader. Class names come from class literals and may be
+# obfuscated; only the reflected main methods need stable names.
+-if class be.mygod.librootkotlinx.impl.RootProcessLauncher
+-keep,allowobfuscation class be.mygod.librootkotlinx.impl.RootProcessBootstrap
+-if class be.mygod.librootkotlinx.impl.RootProcessLauncher
+-keepclassmembers class be.mygod.librootkotlinx.impl.RootProcessBootstrap {
     public static void main(java.lang.String[]);
 }
-
-# PendingRootServiceBind reflects libsu's queued bind task to undo only our own failed startup task.
--if class be.mygod.librootkotlinx.impl.libsu.PendingRootServiceBind
--keepnames class com.topjohnwu.superuser.internal.RootServiceManager
--if class be.mygod.librootkotlinx.impl.libsu.PendingRootServiceBind
--keepclassmembernames class com.topjohnwu.superuser.internal.RootServiceManager {
-	private int flags;
-	private java.util.List pendingTasks;
+-if class be.mygod.librootkotlinx.impl.RootProcessLauncher
+-keep,allowobfuscation class be.mygod.librootkotlinx.impl.RootProcessMain
+-if class be.mygod.librootkotlinx.impl.RootProcessLauncher
+-keepclassmembers class be.mygod.librootkotlinx.impl.RootProcessMain {
+    public static void main(android.content.Context, int, java.lang.String, java.lang.String);
 }

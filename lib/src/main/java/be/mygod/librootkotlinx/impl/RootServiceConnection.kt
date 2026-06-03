@@ -1,109 +1,86 @@
 package be.mygod.librootkotlinx.impl
 
-import android.content.ComponentName
 import android.content.Context
-import android.content.Intent
-import android.content.ServiceConnection
+import android.os.Build
 import android.os.IBinder
 import android.os.ParcelFileDescriptor
 import android.os.RemoteException
 import be.mygod.librootkotlinx.Logger
-import be.mygod.librootkotlinx.impl.libsu.PendingRootServiceBind
-import com.topjohnwu.superuser.ipc.RootService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.asExecutor
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Owns one app-side attempt to bind the libsu RootService and, when needed, start the detached root process.
+ * Owns one app-side attempt to start the root process and receive its command-service Binder.
  */
 internal class RootServiceConnection(
     context: Context,
+    private val niceName: String,
     private val deathRecipient: IBinder.DeathRecipient,
-    private val handleRootIo: suspend (ParcelFileDescriptor, ParcelFileDescriptor, ParcelFileDescriptor) -> Unit,
+    private val handleRootLifecycle: suspend (
+        Process,
+        ParcelFileDescriptor,
+        ParcelFileDescriptor,
+        ParcelFileDescriptor,
+    ) -> Unit,
     private val canStartRootProcess: () -> Boolean,
     private val onConnected: (Connected) -> Boolean,
     private val onCloseRequested: (Throwable) -> Boolean,
-    private val onUnexpectedExit: () -> Throwable,
     private val onStartupFailed: (RootServiceConnection, Throwable) -> Unit,
-) : ServiceConnection {
-    private val packageCodePath = context.packageCodePath
-    private val intent = Intent(context, RootCommandService::class.java)
-    private var pendingBind: PendingRootServiceBind? = null
-    private var cleanupPendingBind = false
-    private var clearPendingEnRoute = false
+) {
+    private val packageName = context.packageName
+    private val packageCodePath = context.applicationInfo.sourceDir?.takeIf(String::isNotEmpty) ?: context.packageCodePath
+    private val codeCacheDir = {
+        if (Build.VERSION.SDK_INT >= 24) context.createDeviceProtectedStorageContext() else {
+            context
+        }.codeCacheDir
+    }
+    private val handoffAuthority = RootServiceHandoff.authority(context)
+    private var handoff: RootServiceHandoff.Registration? = null
     private var rootProcess: RootProcessHandle? = null
     private var startupJob: Job? = null
     @Volatile
     private var connected: Connected? = null
 
-    override fun onServiceConnected(name: ComponentName, binder: IBinder) {
+    @Synchronized
+    private fun onServiceConnected(binder: IBinder): Boolean {
+        if (connected != null) return false
         val remote = IRootCommandService.Stub.asInterface(binder)
         try {
             binder.linkToDeath(deathRecipient, 0)
         } catch (e: RemoteException) {
             onCloseRequested(e)
-            unbindNow("Root service unbind after dead binding failed")
-            return
+            return false
         }
         val connected = Connected(this, binder, remote)
         this.connected = connected
-        if (!onConnected(connected)) connected.closeFromCallback("after closed bind")
-    }
-
-    override fun onServiceDisconnected(name: ComponentName) {
-        onCloseRequested(onUnexpectedExit())
-    }
-
-    override fun onBindingDied(name: ComponentName) {
-        onCloseRequested(onUnexpectedExit())
-    }
-
-    override fun onNullBinding(name: ComponentName) {
-        onCloseRequested(IllegalStateException("Root service returned null binding"))
-    }
-
-    suspend fun bind(scope: CoroutineScope, rootServiceConnected: Job) {
-        val rootProcess = withContext(Dispatchers.Main.immediate) {
-            val pendingBind = PendingRootServiceBind(intent).also { this@RootServiceConnection.pendingBind = it }
-            val task = try {
-                RootService.bindOrTask(
-                    intent,
-                    Dispatchers.Main.immediate.asExecutor(),
-                    this@RootServiceConnection,
-                ).also { task ->
-                    cleanupPendingBind = pendingBind.captureQueuedTask()
-                    if (task != null && pendingBind.ownsStartupIfQueued) {
-                        cleanupPendingBind = true
-                        clearPendingEnRoute = true
-                    }
-                }
-            } catch (e: Throwable) {
-                cleanupPendingBind = pendingBind.captureQueuedTask()
-                if (pendingBind.ownsStartupIfQueued) {
-                    cleanupPendingBind = true
-                    clearPendingEnRoute = true
-                }
-                throw e
-            }
-            if (task != null && canStartRootProcess()) {
-                try {
-                    RootProcessHandle(packageCodePath, task, handleRootIo)
-                } catch (e: Throwable) {
-                    if (pendingBind.ownsStartupIfQueued) {
-                        cleanupPendingBind = true
-                        clearPendingEnRoute = true
-                    }
-                    throw e
-                }.also { this@RootServiceConnection.rootProcess = it }
-            } else null
+        return if (onConnected(connected)) true else {
+            connected.closeFromCallback("after closed handoff")
+            false
         }
-        if (rootProcess != null) startupJob = scope.launch {
+    }
+
+    fun bind(scope: CoroutineScope, rootServiceConnected: Job) {
+        if (!canStartRootProcess()) throw CancellationException("Root startup cancelled")
+        val handoff = RootServiceHandoff.register(::onServiceConnected).also { this.handoff = it }
+        val rootProcess = try {
+            RootProcessHandle(
+                packageName = packageName,
+                packageCodePath = packageCodePath,
+                niceName = niceName,
+                codeCacheDir = codeCacheDir,
+                handoffAuthority = handoffAuthority,
+                handoffToken = handoff.token,
+                handleRootLifecycle = handleRootLifecycle,
+            )
+        } catch (e: Throwable) {
+            handoff.close()
+            this.handoff = null
+            throw e
+        }.also { this.rootProcess = it }
+        startupJob = scope.launch {
             try {
                 rootProcess.run(rootServiceConnected)
             } catch (e: Throwable) {
@@ -113,8 +90,8 @@ internal class RootServiceConnection(
     }
 
     fun markStartupFailed() {
-        cleanupPendingBind = true
-        clearPendingEnRoute = true
+        handoff?.close()
+        handoff = null
     }
 
     suspend fun close(cause: CancellationException, accepted: Connected?) {
@@ -122,48 +99,12 @@ internal class RootServiceConnection(
         // Revoking root-process ownership exits the root process, so close the Binder service first.
         accepted?.close("during cleanup")
         if (delivered !== accepted) delivered?.close("during cleanup")
-        cancelStartup(cause)
-        joinStartup()
-        if (accepted == null && delivered == null) {
-            cleanupPending()
-            unbind("Failed to unbind root service connection during cleanup")
-        }
-        connected = null
-    }
-
-    private fun cancelStartup(cause: CancellationException) {
         startupJob?.cancel(cause)
         rootProcess?.close()
-    }
-
-    private suspend fun joinStartup() {
         startupJob?.join()
-    }
-
-    private suspend fun cleanupPending() {
-        if (!cleanupPendingBind && !clearPendingEnRoute) return
-        val pendingBind = pendingBind ?: return
-        withContext(Dispatchers.Main.immediate) {
-            try {
-                pendingBind.cancel(clearPendingEnRoute)
-            } catch (e: Throwable) {
-                Logger.me.w("Failed to clean up libsu pending RootService bind", e)
-            }
-        }
-    }
-
-    private suspend fun unbind(message: String) {
-        withContext(Dispatchers.Main.immediate) {
-            unbindNow(message)
-        }
-    }
-
-    private fun unbindNow(message: String) {
-        try {
-            RootService.unbind(this)
-        } catch (e: RuntimeException) {
-            Logger.me.w(message, e)
-        }
+        handoff?.close()
+        handoff = null
+        connected = null
     }
 
     class Connected internal constructor(
@@ -173,7 +114,7 @@ internal class RootServiceConnection(
     ) {
         private val closed = AtomicBoolean()
 
-        suspend fun close(reason: String) {
+        fun close(reason: String) {
             if (!closed.compareAndSet(false, true)) return
             try {
                 binder.unlinkToDeath(connection.deathRecipient, 0)
@@ -185,7 +126,6 @@ internal class RootServiceConnection(
             } catch (e: RemoteException) {
                 Logger.me.w("Failed to close root service $reason", e)
             }
-            connection.unbind("Failed to unbind root service connection $reason")
             if (connection.connected === this) connection.connected = null
         }
 
@@ -201,7 +141,6 @@ internal class RootServiceConnection(
             } catch (e: RemoteException) {
                 Logger.me.w("Failed to close root service $reason", e)
             }
-            connection.unbindNow("Failed to unbind root service connection $reason")
             if (connection.connected === this) connection.connected = null
         }
     }

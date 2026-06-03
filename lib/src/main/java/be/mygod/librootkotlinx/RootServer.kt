@@ -32,6 +32,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class RootServer internal constructor() {
+    private companion object {
+        fun Throwable.asCancellationException() = when (this) {
+            is CancellationException -> this
+            else -> CancellationException(message).also { it.initCause(this) }
+        }
+    }
     class UnexpectedExitException : RemoteException("Root service exited unexpectedly")
 
     val active get() = connected != null && closeCause == null && serverJob.isActive
@@ -65,7 +71,12 @@ class RootServer internal constructor() {
     // Session-scoped callback: multiplex by id to avoid leaking per-command Binder callback refs.
     private val callback = object : IRootCommandCallback.Stub(), IBinder.DeathRecipient {
         override fun onResponse(id: Long, response: RootCommandResponse) {
-            handleResponse(id, response)
+            val handling = synchronized(lifecycleLock) {
+                if (closeCause == null) {
+                    commandCallbacks.handleResponse(id, response)
+                } else RootCommandResponseHandling.Done
+            }
+            if (handling == RootCommandResponseHandling.CancelRemote) cancelRemoteSubmitted(id)?.let(::requestClose)
         }
 
         override fun binderDied() {
@@ -74,29 +85,31 @@ class RootServer internal constructor() {
     }
 
     /**
-     * Initialize a RootServer by binding to a libsu RootService.
+     * Initialize a RootServer by starting the owned root command service.
      *
-     * Startup uses libsu's RootService bind handshake. [handleRootIo] is also used as a best-effort startup observer: if
-     * it returns or fails before the service connects, initialization fails. Custom handlers must stay suspended until
-     * startup completes; after startup, handler completion only ends IO handling. If the root-side service returns a null
-     * binding on API 23-27, libsu does not dispatch a null-binding callback, so callers that need bounded startup latency
-     * should apply their own timeout around initialization.
+     * Startup uses the direct provider handoff as its success signal. [handleRootLifecycle] is called only after the
+     * service connects; before then, startup stdio and process-exit diagnostics are library-owned. Cancelling
+     * initialization revokes ownership of any root process that was started.
      *
      * @param context Any [Context] from the app.
-     * @param handleRootIo Handler for observed root process stdin/stdout/stderr.
+     * @param handleRootLifecycle Handler for the root process and observed stdin/stdout/stderr.
      */
     internal suspend fun init(
         context: Context,
-        handleRootIo: suspend (ParcelFileDescriptor, ParcelFileDescriptor, ParcelFileDescriptor) -> Unit,
+        niceName: String,
+        handleRootLifecycle: suspend (
+            Process,
+            ParcelFileDescriptor,
+            ParcelFileDescriptor,
+            ParcelFileDescriptor,
+        ) -> Unit,
     ) {
         synchronized(lifecycleLock) {
             require(!lifecycleStarted && closeCause == null) { "RootServer is already initialized or closed" }
             lifecycleStarted = true
         }
         // Start immediately so a close racing with init cannot cancel before cleanup is installed.
-        serverScope.launch(start = CoroutineStart.UNDISPATCHED) {
-            runLifecycle(context, handleRootIo)
-        }
+        serverScope.launch(start = CoroutineStart.UNDISPATCHED) { runLifecycle(context, niceName, handleRootLifecycle) }
         try {
             started.await()
         } catch (e: Throwable) {
@@ -180,33 +193,43 @@ class RootServer internal constructor() {
      * Close the instance gracefully.
      */
     suspend fun close() {
-        Logger.me.d("Shutting down from client")
-        val cause = closeCause ?: CancellationException("Root server closed")
-        recordCloseCause(cause)
+        val cleanupWithoutLifecycle = synchronized(lifecycleLock) { !lifecycleStarted }
+        val cause = closeCause ?: run {
+            Logger.me.d("Shutting down from client")
+            val closed = CancellationException("Root server closed")
+            recordCloseCause(closed)
+            closeCause ?: closed
+        }
         serverJob.cancel(cause.asCancellationException())
         serverJob.join()
+        if (cleanupWithoutLifecycle) cleanup()
     }
 
     private suspend fun CoroutineScope.runLifecycle(
         context: Context,
-        handleRootIo: suspend (ParcelFileDescriptor, ParcelFileDescriptor, ParcelFileDescriptor) -> Unit,
+        niceName: String,
+        handleRootLifecycle: suspend (
+            Process,
+            ParcelFileDescriptor,
+            ParcelFileDescriptor,
+            ParcelFileDescriptor,
+        ) -> Unit,
     ) {
         try {
             RootServiceConnection(
                 context,
+                niceName,
                 callback,
-                handleRootIo,
+                handleRootLifecycle,
                 canStartRootProcess = { closeCause == null },
                 onConnected = { trySendEvent(Event.Connected(it)) },
                 onCloseRequested = ::requestClose,
-                onUnexpectedExit = { UnexpectedExitException() },
                 onStartupFailed = { connection, cause -> trySendEvent(Event.StartupFailed(connection, cause)) },
             ).also {
                 pendingConnection = it
                 it.bind(this, rootServiceConnected)
             }
-            receiveUntilConnected()
-            receiveUntilClosed()
+            while (closeCause == null) handleEvent(events.receive())
         } catch (e: Throwable) {
             recordCloseCause(e)
         } finally {
@@ -215,73 +238,48 @@ class RootServer internal constructor() {
         }
     }
 
-    private suspend fun receiveUntilConnected() {
-        while (closeCause == null && connected == null) handleEvent(events.receive())
-    }
-
-    private suspend fun receiveUntilClosed() {
-        while (closeCause == null) handleEvent(events.receive())
-    }
-
-    @OptIn(DelicateCoroutinesApi::class)
-    private suspend fun handleEvent(event: Event) {
+    private fun handleEvent(event: Event) {
         when (event) {
-            is Event.Connected -> handleConnected(event)
+            is Event.Connected -> {
+                val service = event.service
+                if (connected == null && closeCause == null) {
+                    connected = service
+                    if (pendingConnection === service.connection) pendingConnection = null
+                    rootServiceConnected.complete()
+                    started.complete(Unit)
+                } else service.close("after cancelled bind")
+            }
             is Event.StartupFailed -> if (connected == null) {
                 if (pendingConnection === event.connection) event.connection.markStartupFailed()
                 recordCloseCause(event.cause)
             }
-            is Event.SendCommand -> sendCommand(event)
-            is Event.CancelRemote -> cancelRemoteOwned(event.id, event.callback)?.let(::recordCloseCause)
+            is Event.SendCommand -> {
+                val remote = connected?.service
+                if (remote == null) {
+                    event.result.completeExceptionally(unavailableCause())
+                    return
+                }
+                val registered = try {
+                    commandCallbacks.register(event.factory)
+                } catch (e: Throwable) {
+                    event.result.completeExceptionally(e)
+                    return
+                }
+                try {
+                    remote.execute(registered.id, RootCommandRequest(event.command), callback)
+                    Logger.me.d("Sent #${registered.id}: ${event.command}")
+                    event.result.complete(registered)
+                } catch (e: Throwable) {
+                    commandCallbacks.unregister(registered.id, registered.callback)
+                    registered.callback.close(e)
+                    event.result.completeExceptionally(e)
+                    if (e is RemoteException) recordCloseCause(e)
+                }
+            }
+            is Event.CancelRemote -> if (commandCallbacks.unregister(event.id, event.callback)) {
+                cancelRemoteSubmitted(event.id)?.let(::recordCloseCause)
+            }
         }
-    }
-
-    private suspend fun handleConnected(event: Event.Connected) {
-        val service = event.service
-        if (connected == null && closeCause == null) {
-            connected = service
-            if (pendingConnection === service.connection) pendingConnection = null
-            rootServiceConnected.complete()
-            started.complete(Unit)
-        } else {
-            service.close("after cancelled bind")
-        }
-    }
-
-    private fun handleResponse(id: Long, response: RootCommandResponse) {
-        val handling = synchronized(lifecycleLock) {
-            if (closeCause == null) commandCallbacks.handleResponse(id, response) else RootCommandResponseHandling.Done
-        }
-        if (handling == RootCommandResponseHandling.CancelRemote) cancelRemoteSubmitted(id)?.let(::requestClose)
-    }
-
-    private fun sendCommand(event: Event.SendCommand) {
-        val remote = connected?.service
-        if (remote == null) {
-            event.result.completeExceptionally(unavailableCause())
-            return
-        }
-        val registered = try {
-            commandCallbacks.register(event.factory)
-        } catch (e: Throwable) {
-            event.result.completeExceptionally(e)
-            return
-        }
-        try {
-            remote.execute(registered.id, RootCommandRequest(event.command), callback)
-            Logger.me.d("Sent #${registered.id}: ${event.command}")
-            event.result.complete(registered)
-        } catch (e: Throwable) {
-            commandCallbacks.unregister(registered.id, registered.callback)
-            registered.callback.close(e)
-            event.result.completeExceptionally(e)
-            if (e is RemoteException) recordCloseCause(e)
-        }
-    }
-
-    private fun cancelRemoteOwned(id: Long, commandCallback: RootCommandCallback? = null): RemoteException? {
-        if (!commandCallbacks.unregister(id, commandCallback)) return null
-        return cancelRemoteSubmitted(id)
     }
 
     private fun cancelRemoteSubmitted(id: Long): RemoteException? {
@@ -310,13 +308,17 @@ class RootServer internal constructor() {
         return true
     }
 
-    private fun recordCloseCause(cause: Throwable): Boolean = synchronized(lifecycleLock) {
-        if (closeCause == null) {
-            closeCause = cause
-            true
-        } else {
-            false
+    private fun recordCloseCause(cause: Throwable): Boolean {
+        val recorded = synchronized(lifecycleLock) {
+            if (closeCause == null) {
+                closeCause = cause
+                true
+            } else false
         }
+        if (recorded && cause !is CancellationException) {
+            Logger.me.w("Root server closing due to failure: ${cause.message ?: cause.javaClass.name}", cause)
+        }
+        return recorded
     }
 
     private suspend fun cleanup() {
@@ -324,6 +326,7 @@ class RootServer internal constructor() {
         val connected = connected
         val pendingConnection = pendingConnection
         recordCloseCause(cause)
+        if (cause !is CancellationException) Logger.me.w("Root server close cause", cause)
         rootServiceConnected.cancel(cause.asCancellationException())
         events.close(cause)
         if (!started.isCompleted) {
@@ -350,7 +353,7 @@ class RootServer internal constructor() {
         factory: (Long) -> RootCommandCallback,
     ): RegisteredRootCommandCallback {
         val result = CompletableDeferred<RegisteredRootCommandCallback>()
-        if (!trySendClientEvent(Event.SendCommand(command, factory, result))) throw unavailableCause()
+        if (!active || !trySendEvent(Event.SendCommand(command, factory, result))) throw unavailableCause()
         // After the event is accepted, cancellation must wait for the id needed to cancel remote work.
         return withContext(NonCancellable) { result.await() }
     }
@@ -359,16 +362,7 @@ class RootServer internal constructor() {
         trySendEvent(Event.CancelRemote(id, commandCallback))
     }
 
-    private fun trySendClientEvent(event: Event) = active && trySendEvent(event)
-
     private fun trySendEvent(event: Event) = events.trySend(event).isSuccess
 
     private fun unavailableCause() = closeCause ?: UnexpectedExitException()
-
-    private companion object {
-        fun Throwable.asCancellationException() = when (this) {
-            is CancellationException -> this
-            else -> CancellationException(message).also { it.initCause(this) }
-        }
-    }
 }

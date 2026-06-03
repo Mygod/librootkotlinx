@@ -1,6 +1,5 @@
 package be.mygod.librootkotlinx.impl
 
-import android.content.Intent
 import android.os.IBinder
 import android.os.Parcelable
 import be.mygod.librootkotlinx.Logger
@@ -8,8 +7,6 @@ import be.mygod.librootkotlinx.ParcelableThrowable
 import be.mygod.librootkotlinx.RootCommand
 import be.mygod.librootkotlinx.RootCommandOneWay
 import be.mygod.librootkotlinx.RootFlow
-import be.mygod.librootkotlinx.systemContext
-import com.topjohnwu.superuser.ipc.RootService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
@@ -21,21 +18,13 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-internal class RootCommandService : RootService() {
+internal class RootCommandService(private val stopRootProcess: () -> Unit = {}) {
     private val serviceJob = SupervisorJob()
     private val commandScope = CoroutineScope(Dispatchers.Main.immediate + serviceJob)
     private val callbackDispatcher = Dispatchers.Default.limitedParallelism(1)
     private val commandJobs = RootCommandJobs()
 
-    override fun onBind(intent: Intent): IBinder {
-        systemContext = this
-        return binder
-    }
-
-    override fun onDestroy() {
-        serviceJob.cancel()
-        super.onDestroy()
-    }
+    fun asBinder(): IBinder = binder
 
     private val binder = object : IRootCommandService.Stub() {
         override fun execute(id: Long, request: RootCommandRequest, callback: IRootCommandCallback) {
@@ -112,7 +101,7 @@ internal class RootCommandService : RootService() {
                 Logger.me.w("Failed to deliver fallback root command failure #$id; stopping root service", fallbackFailure)
                 commandJobs.cancelAll()
                 serviceJob.cancel()
-                stopSelf()
+                stopRootProcess()
             }
         }
     }

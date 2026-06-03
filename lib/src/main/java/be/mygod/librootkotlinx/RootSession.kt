@@ -7,11 +7,11 @@ import android.os.ParcelFileDescriptor
 import androidx.annotation.CallSuper
 import be.mygod.librootkotlinx.io.useLines
 import be.mygod.librootkotlinx.io.openReadChannel
-import kotlinx.coroutines.CoroutineStart
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -36,12 +36,18 @@ abstract class RootSession {
     protected abstract val context: Context
 
     /**
-     * Handles observed stdin/stdout/stderr of the root app_process.
-     *
-     * Keep this suspended while the descriptors should stay open. Returning or failing before startup completes makes
-     * startup fail; after startup, returning only ends IO handling.
+     * Name passed to root app_process through --nice-name.
      */
-    protected open suspend fun handleRootIo(
+    protected open val niceName get() = "${context.packageName}:librootkotlinx:${android.os.Process.myUid() / 100000}"
+
+    /**
+     * Handles the root app_process lifecycle and observed stdin/stdout/stderr.
+     *
+     * This is called after the root command service has connected. Keep it suspended while the descriptors should stay
+     * open. Returning only ends lifecycle handling.
+     */
+    protected open suspend fun handleRootLifecycle(
+        process: Process,
         stdin: ParcelFileDescriptor,
         stdout: ParcelFileDescriptor,
         stderr: ParcelFileDescriptor,
@@ -55,7 +61,7 @@ abstract class RootSession {
     }
 
     @CallSuper
-    protected open suspend fun initServer(server: RootServer) = server.init(context, ::handleRootIo)
+    protected open suspend fun initServer(server: RootServer) = server.init(context, niceName, ::handleRootLifecycle)
 
     /**
      * Timeout to close [RootServer].
@@ -71,6 +77,7 @@ abstract class RootSession {
     private var leaseCount = 0L
     private var closeOnRelease = false
 
+    @Throws(NoShellException::class)
     suspend fun acquire(): RootServer {
         while (true) {
             var activeServer: RootServer? = null
@@ -196,6 +203,7 @@ abstract class RootSession {
             }
         }
     }
+    @Throws(NoShellException::class)
     suspend inline fun <T> use(block: (RootServer) -> T): T {
         val server = acquire()
         try {

@@ -17,6 +17,11 @@ package be.mygod.librootkotlinx {
     property public static be.mygod.librootkotlinx.Logger me;
   }
 
+  public final class NoShellException extends java.lang.Exception {
+    ctor public NoShellException(String message);
+    ctor public NoShellException(String message, Throwable cause);
+  }
+
   @kotlinx.parcelize.Parcelize public final class ParcelableArray implements android.os.Parcelable {
     ctor public ParcelableArray(android.os.Parcelable?[] value);
     method public android.os.Parcelable?[] component1();
@@ -294,15 +299,17 @@ package be.mygod.librootkotlinx {
 
   public abstract class RootSession {
     ctor public RootSession();
-    method public final suspend Object? acquire(kotlin.coroutines.Continuation<? super be.mygod.librootkotlinx.RootServer>);
+    method @kotlin.jvm.Throws(exceptionClasses=NoShellException::class) public final suspend Object? acquire(kotlin.coroutines.Continuation<? super be.mygod.librootkotlinx.RootServer>) throws be.mygod.librootkotlinx.NoShellException;
     method public final suspend Object? closeExisting(kotlin.coroutines.Continuation<? super kotlin.Unit>);
     method @InaccessibleFromKotlin protected abstract android.content.Context getContext();
+    method @InaccessibleFromKotlin protected String getNiceName();
     method @InaccessibleFromKotlin protected kotlinx.coroutines.CoroutineDispatcher getTimeoutDispatcher();
-    method protected suspend Object? handleRootIo(android.os.ParcelFileDescriptor stdin, android.os.ParcelFileDescriptor stdout, android.os.ParcelFileDescriptor stderr, kotlin.coroutines.Continuation<? super kotlin.Unit>);
+    method protected suspend Object? handleRootLifecycle(Process process, android.os.ParcelFileDescriptor stdin, android.os.ParcelFileDescriptor stdout, android.os.ParcelFileDescriptor stderr, kotlin.coroutines.Continuation<? super kotlin.Unit>);
     method @CallSuper protected suspend Object? initServer(be.mygod.librootkotlinx.RootServer server, kotlin.coroutines.Continuation<? super kotlin.Unit>);
     method public final suspend Object? release(be.mygod.librootkotlinx.RootServer server, kotlin.coroutines.Continuation<? super kotlin.Unit>);
-    method public final suspend inline <T> Object? use(kotlin.jvm.functions.Function1<? super be.mygod.librootkotlinx.RootServer,? extends T> block, kotlin.coroutines.Continuation<? super T>);
+    method @kotlin.jvm.Throws(exceptionClasses=NoShellException::class) public final suspend inline <T> Object? use(kotlin.jvm.functions.Function1<? super be.mygod.librootkotlinx.RootServer,? extends T> block, kotlin.coroutines.Continuation<? super T>) throws be.mygod.librootkotlinx.NoShellException;
     property protected abstract android.content.Context context;
+    property protected String niceName;
     property protected kotlin.time.Duration timeout;
     property protected kotlinx.coroutines.CoroutineDispatcher timeoutDispatcher;
   }
@@ -332,6 +339,25 @@ package be.mygod.librootkotlinx.io {
     method @InaccessibleFromKotlin public static void setNonblocking(java.io.FileDescriptor, boolean);
     method public static suspend Object? useLines(io.ktor.utils.io.ByteReadChannel, kotlin.jvm.functions.Function1<? super java.lang.String,kotlin.Unit> block, kotlin.coroutines.Continuation<? super kotlin.Unit>);
     property public static boolean java.io.FileDescriptor.isNonblocking;
+  }
+
+  public final class ProcessCompat {
+    method public static suspend Object? awaitExit(Process, kotlin.coroutines.Continuation<? super java.lang.Integer>);
+    method @InaccessibleFromKotlin public static int getPid(Process);
+    method @kotlin.jvm.Throws(exceptionClasses=IOException::class) public static be.mygod.librootkotlinx.io.ProcessPipes startPipes(ProcessBuilder, optional boolean stdin, optional boolean stdout, optional boolean stderr) throws java.io.IOException;
+    property public static int Process.pid;
+  }
+
+  public final class ProcessPipes implements java.io.Closeable {
+    method public void close();
+    method @InaccessibleFromKotlin public Process getProcess();
+    method @InaccessibleFromKotlin public android.os.ParcelFileDescriptor? getStderr();
+    method @InaccessibleFromKotlin public android.os.ParcelFileDescriptor? getStdin();
+    method @InaccessibleFromKotlin public android.os.ParcelFileDescriptor? getStdout();
+    property public Process process;
+    property public android.os.ParcelFileDescriptor? stderr;
+    property public android.os.ParcelFileDescriptor? stdin;
+    property public android.os.ParcelFileDescriptor? stdout;
   }
 
 }

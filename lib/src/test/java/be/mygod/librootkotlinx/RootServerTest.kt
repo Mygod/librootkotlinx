@@ -11,11 +11,13 @@ import be.mygod.librootkotlinx.impl.RootCommandCallbacks
 import be.mygod.librootkotlinx.impl.RootCommandRequest
 import be.mygod.librootkotlinx.impl.RootCommandResponse
 import be.mygod.librootkotlinx.impl.RootServiceConnection
+import be.mygod.librootkotlinx.impl.RootServiceHandoff
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -24,6 +26,7 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
@@ -123,6 +126,63 @@ class RootServerTest {
     }
 
     @Test
+    fun closeAfterFailureDoesNotLogClientShutdown() = runTest {
+        val logger = RecordingLogger()
+        val previousLogger = Logger.me
+        Logger.me = logger
+        try {
+            val server = RootServer()
+            server.markConnected(RecordingRootCommandService())
+
+            server.deathRecipient().binderDied()
+            server.close()
+
+            assertTrue(logger.warnings.toString(), logger.warnings.any {
+                it.first?.startsWith("Root server closing due to failure: ") == true &&
+                        it.second is RootServer.UnexpectedExitException
+            })
+            assertTrue(logger.warnings.any { it.first == "Root server close cause" && it.second is RootServer.UnexpectedExitException })
+            assertFalse(logger.debugs.contains("Shutting down from client"))
+        } finally {
+            Logger.me = previousLogger
+        }
+    }
+
+    @Test
+    fun startupConnectedEventActivatesServerAndCompletesStartupBarriers() = runTest {
+        val server = RootServer()
+        val service = RecordingRootCommandService()
+        val connection = rootServiceConnection()
+        val connected = connectedService(connection, service)
+        server.markPendingConnection(connection)
+
+        server.handleEvent(rootServerEvent("Connected", connected))
+
+        assertTrue(server.active)
+        assertNull(server.pendingConnection())
+        assertTrue(server.started().isCompleted)
+        assertTrue(server.rootServiceConnected().isCompleted)
+    }
+
+    @Test
+    fun startupFailureEventFromPendingConnectionClosesHandoffAndRecordsCause() = runTest {
+        val server = RootServer()
+        val connection = rootServiceConnection()
+        val registration = RootServiceHandoff.register { true }
+        val failure = RuntimeException("startup failed")
+        connection.setHandoff(registration)
+        server.markPendingConnection(connection)
+
+        server.handleEvent(rootServerEvent("StartupFailed", connection, failure))
+
+        assertSame(failure, server.closeCause())
+        assertFalse(RootServiceHandoff.deliver(registration.token, proxy(IBinder::class.java)))
+        server.cleanup()
+        assertFalse(server.active)
+        assertTrue(server.started().isCompleted)
+    }
+
+    @Test
     fun cleanupClosesConnectionDeliveredService() = runTest {
         val server = RootServer()
         val service = RecordingRootCommandService()
@@ -161,6 +221,19 @@ class RootServerTest {
         override fun asBinder(): IBinder = proxy(IBinder::class.java)
     }
 
+    private class RecordingLogger : Logger {
+        val debugs = mutableListOf<String?>()
+        val warnings = mutableListOf<Pair<String?, Throwable?>>()
+
+        override fun d(m: String?, t: Throwable?) {
+            debugs += m
+        }
+
+        override fun w(m: String?, t: Throwable?) {
+            warnings += m to t
+        }
+    }
+
     private object NoOpOneWayCommand : RootCommandOneWay {
         override suspend fun execute() = Unit
         override fun describeContents() = 0
@@ -181,10 +254,42 @@ class RootServerTest {
         }
     }
 
+    private fun RootServer.pendingConnection(): RootServiceConnection? =
+        RootServer::class.java.getDeclaredField("pendingConnection").let {
+            it.isAccessible = true
+            it.get(this) as RootServiceConnection?
+        }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun RootServer.started(): CompletableDeferred<Unit> =
+        RootServer::class.java.getDeclaredField("started").let {
+            it.isAccessible = true
+            it.get(this) as CompletableDeferred<Unit>
+        }
+
+    private fun RootServer.rootServiceConnected(): Job =
+        RootServer::class.java.getDeclaredField("rootServiceConnected").let {
+            it.isAccessible = true
+            it.get(this) as Job
+        }
+
+    private fun RootServer.closeCause(): Throwable? =
+        RootServer::class.java.getDeclaredField("closeCause").let {
+            it.isAccessible = true
+            it.get(this) as Throwable?
+        }
+
     private fun RootServiceConnection.markConnected(connected: RootServiceConnection.Connected) {
         RootServiceConnection::class.java.getDeclaredField("connected").apply {
             isAccessible = true
             set(this@markConnected, connected)
+        }
+    }
+
+    private fun RootServiceConnection.setHandoff(registration: RootServiceHandoff.Registration) {
+        RootServiceConnection::class.java.getDeclaredField("handoff").apply {
+            isAccessible = true
+            set(this@setHandoff, registration)
         }
     }
 
@@ -230,16 +335,41 @@ class RootServerTest {
 
     private suspend fun RootServer.cleanup() = callSuspend("cleanup")
 
+    private fun RootServer.handleEvent(event: Any) {
+        val method = javaClass.getDeclaredMethod(
+            "handleEvent", Class.forName("${RootServer::class.java.name}\$Event"),
+        ).apply { isAccessible = true }
+        try {
+            method.invoke(this, event)
+        } catch (e: InvocationTargetException) {
+            throw checkNotNull(e.cause)
+        }
+    }
+
     private companion object {
         val unsafe: Unsafe = Unsafe::class.java.getDeclaredField("theUnsafe").let {
             it.isAccessible = true
             it.get(null) as Unsafe
         }
 
-        suspend fun Any.callSuspend(name: String) = suspendCoroutine { continuation ->
-            val method = javaClass.getDeclaredMethod(name, Continuation::class.java).apply { isAccessible = true }
+        fun rootServerEvent(name: String, vararg args: Any): Any {
+            val type = Class.forName("${RootServer::class.java.name}\$Event\$$name")
+            return type.declaredConstructors.single().let {
+                it.isAccessible = true
+                it.newInstance(*args)
+            }
+        }
+
+        suspend fun Any.callSuspend(
+            name: String,
+            parameterTypes: Array<Class<*>> = emptyArray(),
+            vararg args: Any?,
+        ) = suspendCoroutine { continuation ->
+            val method = javaClass.getDeclaredMethod(name, *parameterTypes, Continuation::class.java).apply {
+                isAccessible = true
+            }
             val result = try {
-                method.invoke(this, continuation)
+                method.invoke(this, *args, continuation)
             } catch (e: InvocationTargetException) {
                 continuation.resumeWithException(checkNotNull(e.cause))
                 return@suspendCoroutine
