@@ -31,7 +31,7 @@ internal object AppProcess {
     /**
      * Builds the app_process command from libsu RootServiceManager's launch contract. Intentional changes from libsu:
      * no root-main jar, no RootServerMain, no broadcast manager, the base APK supplies only the bootstrap class, and
-     * only the overrideable nice name is quoted.
+     * the overrideable VM option string is inserted raw before /system/bin.
      *
      * libsu source:
      * https://github.com/topjohnwu/libsu/blob/4910d8dcc1ea3273246614b356fba56e1ce002a5/service/src/main/java/com/topjohnwu/superuser/internal/RootServiceManager.java#L191-L233
@@ -41,6 +41,7 @@ internal object AppProcess {
         clazz: String,
         appProcess: String,
         niceName: String,
+        appProcessVmOption: String?,
     ): String {
         val debugParams = if (Debug.isDebuggerConnected()) when (Build.VERSION.SDK_INT) {
             in 29..Int.MAX_VALUE -> "-XjdwpProvider:adbconnection -XjdwpOptions:suspend=n,server=y "
@@ -48,8 +49,14 @@ internal object AppProcess {
             27 -> "-Xrunjdwp:transport=dt_android_adb,suspend=n,server=y -Xcompiler-option --debuggable "
             else -> ""
         } else ""
-        return "CLASSPATH=${quote(packageCodePath)} exec $appProcess $debugParams-Xnoimage-dex2oat /system/bin ${
-            quote("--nice-name=$niceName")} $clazz"
+        return buildString {
+            append("CLASSPATH=${quote(packageCodePath)} exec $appProcess $debugParams-Xnoimage-dex2oat ")
+            appProcessVmOption?.let {
+                append(it)
+                append(' ')
+            }
+            append("/system/bin ${quote("--nice-name=$niceName")} $clazz")
+        }
     }
 
     /**

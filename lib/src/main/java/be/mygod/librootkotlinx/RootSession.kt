@@ -41,6 +41,12 @@ abstract class RootSession {
     protected open val niceName get() = "${context.packageName}:librootkotlinx:${android.os.Process.myUid() / 100000}"
 
     /**
+     * Optional raw VM option string passed to root app_process before /system/bin. Override callers are responsible for
+     * shell quoting.
+     */
+    protected open val appProcessVmOption: String? = null
+
+    /**
      * Handles the root app_process lifecycle and observed stdin/stdout/stderr.
      *
      * This is called after the root command service has connected. Keep it suspended while the descriptors should stay
@@ -61,7 +67,8 @@ abstract class RootSession {
     }
 
     @CallSuper
-    protected open suspend fun initServer(server: RootServer) = server.init(context, niceName, ::handleRootLifecycle)
+    protected open suspend fun initServer(server: RootServer) =
+        server.init(context, niceName, appProcessVmOption, ::handleRootLifecycle)
 
     /**
      * Timeout to close [RootServer].

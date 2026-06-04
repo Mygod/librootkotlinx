@@ -37,6 +37,7 @@ internal class RootProcessLauncher(
     private val packageName: String,
     private val packageCodePath: String,
     private val niceName: String,
+    private val appProcessVmOption: String?,
     private val codeCacheDir: () -> File,
     private val ownershipSocketName: String,
     private val handoffAuthority: String,
@@ -48,6 +49,7 @@ internal class RootProcessLauncher(
                 packageName = packageName,
                 packageCodePath = packageCodePath,
                 niceName = niceName,
+                appProcessVmOption = appProcessVmOption,
                 stdinPath = pipes.stdinPath,
                 stdoutPath = pipes.stdoutPath,
                 stderrPath = pipes.stderrPath,
@@ -209,6 +211,7 @@ internal class RootProcessLauncher(
             packageName: String,
             packageCodePath: String,
             niceName: String,
+            appProcessVmOption: String?,
             stdinPath: String,
             stdoutPath: String,
             stderrPath: String,
@@ -229,6 +232,7 @@ internal class RootProcessLauncher(
                 clazz = RootProcessBootstrap::class.java.name,
                 appProcess = executable,
                 niceName = niceName,
+                appProcessVmOption = appProcessVmOption,
             )
             return buildString {
                 appendLine("exec 3>$markerPath || exit 1")

@@ -97,6 +97,7 @@ class RootServer internal constructor() {
     internal suspend fun init(
         context: Context,
         niceName: String,
+        appProcessVmOption: String?,
         handleRootLifecycle: suspend (
             Process,
             ParcelFileDescriptor,
@@ -109,7 +110,9 @@ class RootServer internal constructor() {
             lifecycleStarted = true
         }
         // Start immediately so a close racing with init cannot cancel before cleanup is installed.
-        serverScope.launch(start = CoroutineStart.UNDISPATCHED) { runLifecycle(context, niceName, handleRootLifecycle) }
+        serverScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            runLifecycle(context, niceName, appProcessVmOption, handleRootLifecycle)
+        }
         try {
             started.await()
         } catch (e: Throwable) {
@@ -208,6 +211,7 @@ class RootServer internal constructor() {
     private suspend fun CoroutineScope.runLifecycle(
         context: Context,
         niceName: String,
+        appProcessVmOption: String?,
         handleRootLifecycle: suspend (
             Process,
             ParcelFileDescriptor,
@@ -219,6 +223,7 @@ class RootServer internal constructor() {
             RootServiceConnection(
                 context,
                 niceName,
+                appProcessVmOption,
                 callback,
                 handleRootLifecycle,
                 canStartRootProcess = { closeCause == null },
