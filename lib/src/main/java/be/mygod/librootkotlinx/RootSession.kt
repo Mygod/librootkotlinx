@@ -5,6 +5,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.ParcelFileDescriptor
 import androidx.annotation.CallSuper
+import be.mygod.librootkotlinx.impl.AppProcess
 import be.mygod.librootkotlinx.io.useLines
 import be.mygod.librootkotlinx.io.openReadChannel
 import kotlinx.coroutines.CancellationException
@@ -12,6 +13,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.DEBUG_PROPERTY_NAME
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -41,10 +43,16 @@ abstract class RootSession {
     protected open val niceName get() = "${context.packageName}:librootkotlinx:${android.os.Process.myUid() / 100000}"
 
     /**
-     * Optional raw VM option string passed to root app_process before /system/bin. Override callers are responsible for
-     * shell quoting.
+     * Optional raw VM option string passed to root app_process before /system/bin.
+     *
+     * By default this copies explicit coroutine debug system properties into the root VM. Override callers are
+     * responsible for shell quoting.
      */
-    protected open val appProcessVmOption: String? = null
+    protected open val appProcessVmOption: String?
+        get() = COROUTINE_APP_PROCESS_VM_OPTION_PROPERTIES.mapNotNull { name ->
+            val value = System.getProperty(name) ?: return@mapNotNull null
+            "-D$name=${AppProcess.quote(value)}"
+        }.joinToString(" ").ifEmpty { null }
 
     /**
      * Handles the root app_process lifecycle and observed stdin/stdout/stderr.
@@ -225,5 +233,17 @@ abstract class RootSession {
             haltTimeoutLocked()
             closeLocked()
         }
+    }
+
+    private companion object {
+        // kotlinx.coroutines exposes DEBUG_PROPERTY_NAME publicly, but these two debug property names are internal.
+        private const val STACKTRACE_RECOVERY_PROPERTY_NAME = "kotlinx.coroutines.stacktrace.recovery"
+        private const val DEBUG_CREATION_STACK_TRACE_PROPERTY_NAME =
+            "kotlinx.coroutines.debug.enable.creation.stack.trace"
+        val COROUTINE_APP_PROCESS_VM_OPTION_PROPERTIES = arrayOf(
+            DEBUG_PROPERTY_NAME,
+            STACKTRACE_RECOVERY_PROPERTY_NAME,
+            DEBUG_CREATION_STACK_TRACE_PROPERTY_NAME,
+        )
     }
 }
