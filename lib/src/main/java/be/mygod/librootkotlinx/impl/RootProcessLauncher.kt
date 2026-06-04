@@ -234,16 +234,33 @@ internal class RootProcessLauncher(
                 niceName = niceName,
                 appProcessVmOption = appProcessVmOption,
             )
+            val phhLaunch = AppProcess.launchString(
+                packageCodePath = packageCodePath,
+                clazz = RootProcessBootstrap::class.java.name,
+                appProcess = "runcon u:r:su:s0 ${AppProcess.quote(executable)}",
+                niceName = niceName,
+                appProcessVmOption = appProcessVmOption,
+            )
+            val launchSuffix = "$packageName $userId $ownershipSocketName $handoffAuthority ${
+                handoffToken} <&4 >&5 2>&6 4<&- 5>&- 6>&-"
             return buildString {
                 appendLine("exec 3>$markerPath || exit 1")
                 appendLine("exec 4<$stdinPath || exit 1")
                 appendLine("exec 5>$stdoutPath || exit 1")
                 appendLine("exec 6>$stderrPath || exit 1")
                 append(relocationScript)
+                // PHH Superuser starts commands in phhsu_daemon, which blocks app-to-root Binder; see:
+                // https://github.com/Mygod/VPNHotspot/issues/753
+                appendLine("if [ \"$(id -Z 2>/dev/null)\" = \"u:r:phhsu_daemon:s0\" ] && runcon u:r:su:s0 true 2>/dev/null; then")
+                appendLine("  phh_runcon=1")
+                appendLine("fi")
                 appendLine("printf '%s\\n' $STARTUP_MARKER_STARTED >&3 || exit 1")
                 appendLine("exec 3>&-")
-                appendLine("$launch $packageName $userId $ownershipSocketName $handoffAuthority ${
-                    handoffToken} <&4 >&5 2>&6 4<&- 5>&- 6>&-")
+                appendLine($$"if [ \"$phh_runcon\" = 1 ]; then")
+                appendLine("  $phhLaunch $launchSuffix")
+                appendLine("else")
+                appendLine("  $launch $launchSuffix")
+                appendLine("fi")
             }
         }
     }
