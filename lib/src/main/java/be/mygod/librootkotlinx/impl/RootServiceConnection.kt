@@ -16,7 +16,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Owns one app-side attempt to start the root process and receive its command-service Binder.
  */
 internal class RootServiceConnection(
-    context: Context,
+    private val context: Context,
     private val niceName: String,
     private val deathRecipient: IBinder.DeathRecipient,
     private val handleRootLifecycle: suspend (
@@ -30,14 +30,6 @@ internal class RootServiceConnection(
     private val onCloseRequested: (Throwable) -> Boolean,
     private val onStartupFailed: (RootServiceConnection, Throwable) -> Unit,
 ) {
-    private val packageName = context.packageName
-    private val packageCodePath = context.applicationInfo.sourceDir?.takeIf(String::isNotEmpty) ?: context.packageCodePath
-    private val codeCacheDir = {
-        if (Build.VERSION.SDK_INT >= 24) context.createDeviceProtectedStorageContext() else {
-            context
-        }.codeCacheDir
-    }
-    private val handoffAuthority = RootServiceHandoff.authority(context)
     private var handoff: RootServiceHandoff.Registration? = null
     private var rootProcess: RootProcessHandle? = null
     private var startupJob: Job? = null
@@ -67,11 +59,16 @@ internal class RootServiceConnection(
         val handoff = RootServiceHandoff.register(::onServiceConnected).also { this.handoff = it }
         val rootProcess = try {
             RootProcessHandle(
-                packageName = packageName,
-                packageCodePath = packageCodePath,
+                packageName = context.packageName,
+                packageCodePath = context.applicationInfo.sourceDir?.takeIf(String::isNotEmpty)
+                    ?: context.packageCodePath,
                 niceName = niceName,
-                codeCacheDir = codeCacheDir,
-                handoffAuthority = handoffAuthority,
+                codeCacheDir = {
+                    if (Build.VERSION.SDK_INT >= 24) context.createDeviceProtectedStorageContext() else {
+                        context
+                    }.codeCacheDir
+                },
+                handoffAuthority = RootServiceHandoff.authority(context),
                 handoffToken = handoff.token,
                 handleRootLifecycle = handleRootLifecycle,
             )
@@ -82,6 +79,8 @@ internal class RootServiceConnection(
         }.also { this.rootProcess = it }
         startupJob = scope.launch {
             try {
+                if (AppProcess.hasStartupAgents(context)) Logger.me.w("JVMTI agent is enabled. Please enable the " +
+                        "'Always install with package manager' option in Android Studio.")
                 rootProcess.run(rootServiceConnected)
             } catch (e: Throwable) {
                 if (e !is CancellationException) onStartupFailed(this@RootServiceConnection, e)

@@ -1,11 +1,22 @@
 package be.mygod.librootkotlinx.impl
 
+import android.content.Context
 import android.os.Build
 import android.os.Debug
 import android.system.Os
+import java.io.File
 
 internal object AppProcess {
     val myExe get() = "/proc/${Os.getpid()}/exe"
+
+    /**
+     * Mirrors libsu's Android Studio startup-agent warning probe. Optimized consumer builds strip this diagnostic path.
+     *
+     * libsu source:
+     * https://github.com/topjohnwu/libsu/blob/4910d8dcc1ea3273246614b356fba56e1ce002a5/core/src/main/java/com/topjohnwu/superuser/internal/Utils.java#L127-L131
+     */
+    fun hasStartupAgents(context: Context) = Build.VERSION.SDK_INT >= 30 &&
+            File(context.codeCacheDir, "startup_agents").isDirectory
 
     /**
      * app_process relocation workaround for Samsung/old-Android exec failures.

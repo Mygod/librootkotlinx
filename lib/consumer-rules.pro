@@ -13,3 +13,11 @@
 -keepclassmembers class be.mygod.librootkotlinx.impl.RootProcessMain {
     public static void main(android.content.Context, int, java.lang.String, java.lang.String);
 }
+
+# Strip root-process debugging support from optimized consumer builds.
+-assumenosideeffects class be.mygod.librootkotlinx.impl.AppProcess {
+    boolean hasStartupAgents*(android.content.Context) return false;
+}
+-assumenosideeffects class android.os.Debug {
+    public static boolean isDebuggerConnected() return false;
+}
