@@ -20,7 +20,6 @@ import kotlin.coroutines.CoroutineContext
 internal class RootServiceConnection(
     private val context: Context,
     private val niceName: String,
-    private val appProcessVmOption: String?,
     private val deathRecipient: IBinder.DeathRecipient,
     private val handleRootLifecycle: suspend (
         Process,
@@ -67,7 +66,6 @@ internal class RootServiceConnection(
                 packageCodePath = context.applicationInfo.sourceDir?.takeIf(String::isNotEmpty)
                     ?: context.packageCodePath,
                 niceName = niceName,
-                appProcessVmOption = appProcessVmOption,
                 codeCacheDir = {
                     if (Build.VERSION.SDK_INT >= 24) context.createDeviceProtectedStorageContext() else {
                         context

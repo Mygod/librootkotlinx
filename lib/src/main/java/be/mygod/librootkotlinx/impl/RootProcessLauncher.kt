@@ -38,7 +38,6 @@ internal class RootProcessLauncher(
     private val packageName: String,
     private val packageCodePath: String,
     private val niceName: String,
-    private val appProcessVmOption: String?,
     private val codeCacheDir: () -> File,
     private val ownershipSocketName: String,
     private val handoffAuthority: String,
@@ -50,7 +49,6 @@ internal class RootProcessLauncher(
                 packageName = packageName,
                 packageCodePath = packageCodePath,
                 niceName = niceName,
-                appProcessVmOption = appProcessVmOption,
                 stdinPath = pipes.stdinPath,
                 stdoutPath = pipes.stdoutPath,
                 stderrPath = pipes.stderrPath,
@@ -216,7 +214,6 @@ internal class RootProcessLauncher(
             packageName: String,
             packageCodePath: String,
             niceName: String,
-            appProcessVmOption: String?,
             stdinPath: String,
             stdoutPath: String,
             stderrPath: String,
@@ -237,14 +234,12 @@ internal class RootProcessLauncher(
                 clazz = RootProcessBootstrap::class.java.name,
                 appProcess = executable,
                 niceName = niceName,
-                appProcessVmOption = appProcessVmOption,
             )
             val phhLaunch = AppProcess.launchString(
                 packageCodePath = packageCodePath,
                 clazz = RootProcessBootstrap::class.java.name,
                 appProcess = "runcon u:r:su:s0 ${AppProcess.quote(executable)}",
                 niceName = niceName,
-                appProcessVmOption = appProcessVmOption,
             )
             val launchSuffix = "$packageName $userId $ownershipSocketName $handoffAuthority ${
                 handoffToken} <&4 >&5 2>&6 4<&- 5>&- 6>&-"

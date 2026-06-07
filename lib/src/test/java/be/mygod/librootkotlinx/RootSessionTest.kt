@@ -4,7 +4,6 @@ import android.os.IBinder
 import be.mygod.librootkotlinx.impl.IRootCommandService
 import be.mygod.librootkotlinx.impl.RootServiceConnection
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.DEBUG_PROPERTY_NAME
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -22,7 +21,6 @@ import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.withContext
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
@@ -197,32 +195,6 @@ class RootSessionTest {
     }
 
     @Test
-    fun appProcessVmOptionOmitsUnsetCoroutineProperties() {
-        withSystemProperties(
-            DEBUG_PROPERTY_NAME to null,
-            "kotlinx.coroutines.stacktrace.recovery" to null,
-            "kotlinx.coroutines.debug.enable.creation.stack.trace" to null,
-        ) {
-            assertNull(object : TestRootSession() { }.appProcessVmOptionForTest())
-        }
-    }
-
-    @Test
-    fun appProcessVmOptionCopiesExplicitCoroutinePropertiesWithQuotedValues() {
-        withSystemProperties(
-            DEBUG_PROPERTY_NAME to "on",
-            "kotlinx.coroutines.stacktrace.recovery" to "false",
-            "kotlinx.coroutines.debug.enable.creation.stack.trace" to "client's value",
-        ) {
-            assertEquals(
-                "-Dkotlinx.coroutines.debug='on' -Dkotlinx.coroutines.stacktrace.recovery='false' " +
-                        "-Dkotlinx.coroutines.debug.enable.creation.stack.trace='client'\\''s value'",
-                object : TestRootSession() { }.appProcessVmOptionForTest(),
-            )
-        }
-    }
-
-    @Test
     fun failedStartupAcquirePropagatesFailureToWaitingAcquire() = runTest {
         val initStarted = CompletableDeferred<Unit>()
         val failStartup = CompletableDeferred<Unit>()
@@ -275,8 +247,6 @@ class RootSessionTest {
 
     private abstract class TestRootSession : RootSession() {
         override val context get() = throw AssertionError("Unexpected context access")
-
-        fun appProcessVmOptionForTest() = appProcessVmOption
     }
 
     private suspend fun awaitStartupFailure(acquire: Deferred<RootServer>): TestStartupException = try {
@@ -329,20 +299,6 @@ class RootSessionTest {
             java.lang.Float.TYPE -> 0F
             java.lang.Double.TYPE -> 0.0
             else -> null
-        }
-
-        fun withSystemProperties(vararg values: Pair<String, String?>, block: () -> Unit) {
-            val previous = values.associate { it.first to System.getProperty(it.first) }
-            try {
-                for ((name, value) in values) {
-                    if (value == null) System.clearProperty(name) else System.setProperty(name, value)
-                }
-                block()
-            } finally {
-                for ((name, value) in previous) {
-                    if (value == null) System.clearProperty(name) else System.setProperty(name, value)
-                }
-            }
         }
     }
 }
