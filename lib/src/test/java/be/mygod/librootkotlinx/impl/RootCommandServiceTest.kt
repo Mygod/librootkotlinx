@@ -8,7 +8,9 @@ import be.mygod.librootkotlinx.RootCommand
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -19,7 +21,7 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class RootCommandServiceTest {
-    private val mainDispatcher = UnconfinedTestDispatcher()
+    private val mainDispatcher = StandardTestDispatcher()
 
     @Before
     fun setUp() {
@@ -41,12 +43,13 @@ class RootCommandServiceTest {
         assertFailureResponseFallsBack(RuntimeException("rich failure cannot be parceled"))
     }
 
-    private suspend fun assertFailureResponseFallsBack(firstFailure: Throwable) {
+    private suspend fun TestScope.assertFailureResponseFallsBack(firstFailure: Throwable) {
         val service = RootCommandService()
         val callback = FailingFirstResponseCallback(firstFailure)
 
         service.binder().execute(7, RootCommandRequest(FailingCommand), callback)
         val response = callback.fallbackResponse.await()
+        advanceUntilIdle()
 
         assertEquals(2, callback.responseCalls)
         assertEquals(7, callback.responseId)
@@ -61,6 +64,7 @@ class RootCommandServiceTest {
 
         service.binder().execute(7, RootCommandRequest(FailingCommand), callback)
         stopped.await()
+        advanceUntilIdle()
 
         assertEquals(2, callback.responseCalls)
     }
