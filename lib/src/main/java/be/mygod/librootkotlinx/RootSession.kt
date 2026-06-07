@@ -26,6 +26,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.CoroutineContext
 import kotlin.time.Duration.Companion.minutes
 
 /**
@@ -74,9 +75,19 @@ abstract class RootSession {
         }
     }
 
+    /**
+     * Coroutine context for [handleRootLifecycle].
+     *
+     * The default returns a fresh [SupervisorJob] for each root startup so lifecycle handling can finish independently
+     * from [RootServer.close]. Override with a context without a [Job], such as `EmptyCoroutineContext`, to make
+     * lifecycle handling inherit the server scope and participate in structured close cleanup. Overrides that include
+     * a [Job] should provide a fresh usable job for each startup.
+     */
+    protected open val rootLifecycleCoroutineContext: CoroutineContext get() = SupervisorJob()
+
     @CallSuper
     protected open suspend fun initServer(server: RootServer) =
-        server.init(context, niceName, appProcessVmOption, ::handleRootLifecycle)
+        server.init(context, niceName, appProcessVmOption, rootLifecycleCoroutineContext, ::handleRootLifecycle)
 
     /**
      * Timeout to close [RootServer].

@@ -30,6 +30,7 @@ import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.CoroutineContext
 
 class RootServer internal constructor() {
     private companion object {
@@ -92,12 +93,14 @@ class RootServer internal constructor() {
      * initialization revokes ownership of any root process that was started.
      *
      * @param context Any [Context] from the app.
+     * @param rootLifecycleCoroutineContext Coroutine context for the root process lifecycle handler.
      * @param handleRootLifecycle Handler for the root process and observed stdin/stdout/stderr.
      */
     internal suspend fun init(
         context: Context,
         niceName: String,
         appProcessVmOption: String?,
+        rootLifecycleCoroutineContext: CoroutineContext,
         handleRootLifecycle: suspend (
             Process,
             ParcelFileDescriptor,
@@ -111,7 +114,7 @@ class RootServer internal constructor() {
         }
         // Start immediately so a close racing with init cannot cancel before cleanup is installed.
         serverScope.launch(start = CoroutineStart.UNDISPATCHED) {
-            runLifecycle(context, niceName, appProcessVmOption, handleRootLifecycle)
+            runLifecycle(context, niceName, appProcessVmOption, rootLifecycleCoroutineContext, handleRootLifecycle)
         }
         try {
             started.await()
@@ -212,6 +215,7 @@ class RootServer internal constructor() {
         context: Context,
         niceName: String,
         appProcessVmOption: String?,
+        rootLifecycleCoroutineContext: CoroutineContext,
         handleRootLifecycle: suspend (
             Process,
             ParcelFileDescriptor,
@@ -226,6 +230,7 @@ class RootServer internal constructor() {
                 appProcessVmOption,
                 callback,
                 handleRootLifecycle,
+                rootLifecycleCoroutineContext,
                 canStartRootProcess = { closeCause == null },
                 onConnected = { trySendEvent(Event.Connected(it)) },
                 onCloseRequested = ::requestClose,

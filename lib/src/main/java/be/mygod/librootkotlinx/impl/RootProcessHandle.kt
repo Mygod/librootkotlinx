@@ -9,7 +9,6 @@ import be.mygod.librootkotlinx.io.awaitExit
 import be.mygod.librootkotlinx.io.openReadChannel
 import be.mygod.librootkotlinx.io.useLines
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -25,6 +24,7 @@ import kotlinx.coroutines.withContext
 import java.io.Closeable
 import java.io.File
 import java.io.IOException
+import kotlin.coroutines.CoroutineContext
 
 /**
  * Owns app-side resources for one root process: startup diagnostics, ownership rendezvous, and shutdown revocation.
@@ -58,7 +58,7 @@ internal class RootProcessHandle(
         handoffToken = handoffToken,
     )
 
-    suspend fun run(rootServiceConnected: Job) = coroutineScope {
+    suspend fun run(rootServiceConnected: Job, rootLifecycleCoroutineContext: CoroutineContext) = coroutineScope {
         val pipes = RootProcessPipes()
         var handlerStdio: RootProcessHandlerStdio? = null
         val diagnosticChannels = ArrayList<FileDescriptorByteReadChannel>(2)
@@ -104,29 +104,19 @@ internal class RootProcessHandle(
                 startupStdioClosed.cancelAndJoin()
             }
             cancelDiagnostics()
-            val handlerCompletion = CompletableDeferred<Throwable?>()
-            launch {
-                var failure: Throwable? = null
+            launch(rootLifecycleCoroutineContext) {
                 try {
                     handleRootLifecycle(process.process, stdio.stdin, stdio.stdout, stdio.stderr)
                 } catch (e: CancellationException) {
                     if (!currentCoroutineContext().isActive) throw e
-                    failure = e
                     Logger.me.w("Root lifecycle handling cancelled", e)
                 } catch (e: Throwable) {
-                    failure = e
                     Logger.me.w("Root lifecycle handling failed", e)
-                } finally {
-                    if (failure != null || currentCoroutineContext().isActive) handlerCompletion.complete(failure)
                 }
             }.invokeOnCompletion {
                 stdio.close()
-                if (it is CancellationException) {
-                    handlerCompletion.cancel(it)
-                } else handlerCompletion.complete(it)
             }
             handlerStdio = null
-            handlerCompletion.await()
         } finally {
             cancelDiagnostics()
             withContext(NonCancellable) { handlerStdio?.close() }

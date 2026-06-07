@@ -12,6 +12,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.coroutines.CoroutineContext
 
 /**
  * Owns one app-side attempt to start the root process and receive its command-service Binder.
@@ -27,6 +28,7 @@ internal class RootServiceConnection(
         ParcelFileDescriptor,
         ParcelFileDescriptor,
     ) -> Unit,
+    private val rootLifecycleCoroutineContext: CoroutineContext,
     private val canStartRootProcess: () -> Boolean,
     private val onConnected: (Connected) -> Boolean,
     private val onCloseRequested: (Throwable) -> Boolean,
@@ -34,7 +36,7 @@ internal class RootServiceConnection(
 ) {
     private var handoff: RootServiceHandoff.Registration? = null
     private var rootProcess: RootProcessHandle? = null
-    private var startupJob: Job? = null
+    private var rootProcessJob: Job? = null
     @Volatile
     private var connected: Connected? = null
 
@@ -80,11 +82,11 @@ internal class RootServiceConnection(
             this.handoff = null
             throw e
         }.also { this.rootProcess = it }
-        startupJob = scope.launch {
+        rootProcessJob = scope.launch {
             try {
                 if (AppProcess.hasStartupAgents(context)) Logger.me.w("JVMTI agent is enabled. Please enable the " +
                         "'Always install with package manager' option in Android Studio.")
-                rootProcess.run(rootServiceConnected)
+                rootProcess.run(rootServiceConnected, rootLifecycleCoroutineContext)
             } catch (e: Throwable) {
                 if (e !is CancellationException) onStartupFailed(this@RootServiceConnection, e)
             }
@@ -101,9 +103,9 @@ internal class RootServiceConnection(
         // Revoking root-process ownership exits the root process, so close the Binder service first.
         accepted?.close("during cleanup")
         if (delivered !== accepted) delivered?.close("during cleanup")
-        startupJob?.cancel(cause)
+        rootProcessJob?.cancel(cause)
         rootProcess?.close()
-        startupJob?.join()
+        rootProcessJob?.join()
         handoff?.close()
         handoff = null
         connected = null

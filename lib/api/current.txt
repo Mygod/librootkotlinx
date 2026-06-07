@@ -304,6 +304,7 @@ package be.mygod.librootkotlinx {
     method @InaccessibleFromKotlin protected String? getAppProcessVmOption();
     method @InaccessibleFromKotlin protected abstract android.content.Context getContext();
     method @InaccessibleFromKotlin protected String getNiceName();
+    method @InaccessibleFromKotlin protected kotlin.coroutines.CoroutineContext getRootLifecycleCoroutineContext();
     method @InaccessibleFromKotlin protected kotlinx.coroutines.CoroutineDispatcher getTimeoutDispatcher();
     method protected suspend Object? handleRootLifecycle(Process process, android.os.ParcelFileDescriptor stdin, android.os.ParcelFileDescriptor stdout, android.os.ParcelFileDescriptor stderr, kotlin.coroutines.Continuation<? super kotlin.Unit>);
     method @CallSuper protected suspend Object? initServer(be.mygod.librootkotlinx.RootServer server, kotlin.coroutines.Continuation<? super kotlin.Unit>);
@@ -312,6 +313,7 @@ package be.mygod.librootkotlinx {
     property protected String? appProcessVmOption;
     property protected abstract android.content.Context context;
     property protected String niceName;
+    property protected kotlin.coroutines.CoroutineContext rootLifecycleCoroutineContext;
     property protected kotlin.time.Duration timeout;
     property protected kotlinx.coroutines.CoroutineDispatcher timeoutDispatcher;
   }
