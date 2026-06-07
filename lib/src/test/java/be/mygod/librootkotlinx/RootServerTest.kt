@@ -1,5 +1,6 @@
 package be.mygod.librootkotlinx
 
+import android.os.DeadObjectException
 import android.os.IBinder
 import android.os.Parcel
 import android.os.Parcelable
@@ -196,8 +197,59 @@ class RootServerTest {
         assertEquals(1, service.closeCalls)
     }
 
+    @Test
+    fun cleanupLogsDeadRootServiceCloseAsDebug() = runTest {
+        val logger = RecordingLogger()
+        val previousLogger = Logger.me
+        Logger.me = logger
+        try {
+            val server = RootServer()
+            val failure = DeadObjectException()
+            val service = RecordingRootCommandService(closeFailure = failure)
+            val connection = rootServiceConnection()
+            connection.markConnected(connectedService(connection, service))
+            server.markPendingConnection(connection)
+            server.setCloseCause(CancellationException("closing"))
+
+            server.cleanup()
+
+            assertEquals(1, service.closeCalls)
+            assertEquals(listOf("Root service already dead during cleanup"), logger.debugs)
+            assertFalse(logger.warnings.any { it.second === failure })
+        } finally {
+            Logger.me = previousLogger
+        }
+    }
+
+    @Test
+    fun cleanupLogsUnexpectedRootServiceCloseFailureAsWarning() = runTest {
+        val logger = RecordingLogger()
+        val previousLogger = Logger.me
+        Logger.me = logger
+        try {
+            val server = RootServer()
+            val failure = RemoteException("remote close failed")
+            val service = RecordingRootCommandService(closeFailure = failure)
+            val connection = rootServiceConnection()
+            connection.markConnected(connectedService(connection, service))
+            server.markPendingConnection(connection)
+            server.setCloseCause(CancellationException("closing"))
+
+            server.cleanup()
+
+            assertEquals(1, service.closeCalls)
+            assertFalse(logger.debugs.contains("Root service already dead during cleanup"))
+            assertTrue(logger.warnings.any {
+                it.first == "Failed to close root service during cleanup" && it.second === failure
+            })
+        } finally {
+            Logger.me = previousLogger
+        }
+    }
+
     private class RecordingRootCommandService(
         private val oneWayFailure: RemoteException? = null,
+        private val closeFailure: RemoteException? = null,
     ) : IRootCommandService {
         var oneWayCalls = 0
         var cancelCalls = 0
@@ -216,6 +268,7 @@ class RootServerTest {
 
         override fun close() {
             ++closeCalls
+            closeFailure?.let { throw it }
         }
 
         override fun asBinder(): IBinder = proxy(IBinder::class.java)

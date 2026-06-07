@@ -2,6 +2,7 @@ package be.mygod.librootkotlinx.impl
 
 import android.content.Context
 import android.os.Build
+import android.os.DeadObjectException
 import android.os.IBinder
 import android.os.ParcelFileDescriptor
 import android.os.RemoteException
@@ -122,11 +123,7 @@ internal class RootServiceConnection(
             } catch (e: RuntimeException) {
                 Logger.me.w("Failed to unlink root service death recipient $reason", e)
             }
-            try {
-                service.close()
-            } catch (e: RemoteException) {
-                Logger.me.w("Failed to close root service $reason", e)
-            }
+            closeService(reason)
             if (connection.connected === this) connection.connected = null
         }
 
@@ -137,12 +134,18 @@ internal class RootServiceConnection(
             } catch (e: RuntimeException) {
                 Logger.me.w("Failed to unlink root service death recipient $reason", e)
             }
+            closeService(reason)
+            if (connection.connected === this) connection.connected = null
+        }
+
+        private fun closeService(reason: String) {
             try {
                 service.close()
+            } catch (e: DeadObjectException) {
+                Logger.me.d("Root service already dead $reason", e)
             } catch (e: RemoteException) {
                 Logger.me.w("Failed to close root service $reason", e)
             }
-            if (connection.connected === this) connection.connected = null
         }
     }
 }
