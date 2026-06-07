@@ -24,6 +24,7 @@ import kotlinx.coroutines.withContext
 import java.io.Closeable
 import java.io.File
 import java.io.IOException
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.CoroutineContext
 
 /**
@@ -44,8 +45,7 @@ internal class RootProcessHandle(
     ) -> Unit,
 ) : Closeable {
     private val ownership = RootProcessOwnership()
-    @Volatile
-    private var process: Process? = null
+    private val ownedProcess = AtomicReference<Process?>()
     private val launcher = RootProcessLauncher(
         packageName = packageName,
         packageCodePath = packageCodePath,
@@ -86,7 +86,7 @@ internal class RootProcessHandle(
                     }
                 }
             }
-            val process = launcher.launch(pipes).also { this@RootProcessHandle.process = it.process }
+            val process = launcher.launch(pipes).also { ownedProcess.set(it.process) }
             pipes.closeRemaining()
             val ownershipAccepted = async { ownership.accept() }
             val startupDiagnosticDrains = diagnosticDrains.toList()
@@ -103,6 +103,7 @@ internal class RootProcessHandle(
             }
             cancelDiagnostics()
             launch(rootLifecycleCoroutineContext) {
+                if (ownedProcess.getAndSet(null) == null) return@launch
                 try {
                     handleRootLifecycle(process.process, stdio.stdin, stdio.stdout, stdio.stderr)
                 } catch (e: CancellationException) {
@@ -124,7 +125,7 @@ internal class RootProcessHandle(
 
     override fun close() {
         ownership.close()
-        process?.destroy()
+        ownedProcess.getAndSet(null)?.destroy()
     }
 
     companion object {
