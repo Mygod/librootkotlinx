@@ -3,6 +3,7 @@ package be.mygod.librootkotlinx.impl
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.system.ErrnoException
 import be.mygod.librootkotlinx.NoShellException
 import be.mygod.librootkotlinx.io.ProcessPipes
 import be.mygod.librootkotlinx.io.awaitExit
@@ -160,14 +161,18 @@ internal class RootProcessLauncher(
             input.writeFully(command.encodeToByteArray())
             input.flushAndClose()
             return process
-        } catch (e: IOException) {
-            input?.cancel(e)
-            process.close()
-            throw NoShellException("Root shell died before root service startup", e)
         } catch (e: Throwable) {
             input?.cancel(e)
-            process.close()
-            throw e
+            throw when (e) {
+                is IOException, is ErrnoException -> NoShellException("Root shell died before root service startup", e)
+                else -> e
+            }.apply {
+                try {
+                    process.close()
+                } catch (close: IOException) {
+                    addSuppressed(close)
+                }
+            }
         }
     }
 
