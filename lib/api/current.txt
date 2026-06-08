@@ -356,6 +356,9 @@ package be.mygod.librootkotlinx.io {
     method @InaccessibleFromKotlin public android.os.ParcelFileDescriptor? getStderr();
     method @InaccessibleFromKotlin public android.os.ParcelFileDescriptor? getStdin();
     method @InaccessibleFromKotlin public android.os.ParcelFileDescriptor? getStdout();
+    method public android.os.ParcelFileDescriptor requireStderr();
+    method public android.os.ParcelFileDescriptor requireStdin();
+    method public android.os.ParcelFileDescriptor requireStdout();
     property public Process process;
     property public android.os.ParcelFileDescriptor? stderr;
     property public android.os.ParcelFileDescriptor? stdin;

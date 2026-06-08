@@ -43,9 +43,9 @@ class MainActivity : ComponentActivity() {
                 var stdout: FileDescriptorByteReadChannel? = null
                 var stderr: FileDescriptorByteReadChannel? = null
                 try {
-                    val stdoutChannel = process.stdout!!.openReadChannel(handler)
+                    val stdoutChannel = process.requireStdout().openReadChannel(handler)
                     stdout = stdoutChannel
-                    val stderrChannel = process.stderr!!.openReadChannel(handler)
+                    val stderrChannel = process.requireStderr().openReadChannel(handler)
                     stderr = stderrChannel
                     val stdoutText = async { stdoutChannel.readRemaining().readText() }
                     val stderrText = async { stderrChannel.readRemaining().readText() }

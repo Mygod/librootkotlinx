@@ -35,6 +35,21 @@ class ProcessPipes internal constructor(
     val stdout: ParcelFileDescriptor?,
     val stderr: ParcelFileDescriptor?,
 ) : Closeable {
+    /**
+     * Returns [stdin], or throws if this process was started without a stdin pipe.
+     */
+    fun requireStdin(): ParcelFileDescriptor = checkNotNull(stdin) { "stdin pipe was not requested" }
+
+    /**
+     * Returns [stdout], or throws if this process was started without a stdout pipe.
+     */
+    fun requireStdout(): ParcelFileDescriptor = checkNotNull(stdout) { "stdout pipe was not requested" }
+
+    /**
+     * Returns [stderr], or throws if this process was started without a stderr pipe.
+     */
+    fun requireStderr(): ParcelFileDescriptor = checkNotNull(stderr) { "stderr pipe was not requested" }
+
     override fun close() {
         var failure: IOException? = null
         fun ParcelFileDescriptor?.closeOwned() {

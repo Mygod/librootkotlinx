@@ -75,11 +75,9 @@ internal class RootProcessLauncher(
             var shellErrorChannel: ByteReadChannel? = null
             try {
                 val handler = Handler(Looper.getMainLooper())
-                val shellOutputPipe = checkNotNull(rootShell.stdout) { "Root shell stdout pipe was not requested" }
-                    .openReadChannel(handler)
+                val shellOutputPipe = rootShell.requireStdout().openReadChannel(handler)
                 shellOutputChannel = shellOutputPipe
-                val shellErrorPipe = checkNotNull(rootShell.stderr) { "Root shell stderr pipe was not requested" }
-                    .openReadChannel(handler)
+                val shellErrorPipe = rootShell.requireStderr().openReadChannel(handler)
                 shellErrorChannel = shellErrorPipe
                 coroutineScope {
                     val shellOutput = async { shellOutputPipe.drainStartupDiagnostics(diagnostics) }
@@ -154,8 +152,7 @@ internal class RootProcessLauncher(
         val process = startRootShell()
         var input: ByteWriteChannel? = null
         try {
-            input = checkNotNull(process.stdin) { "Root shell stdin pipe was not requested" }
-                .openWriteChannel(Handler(Looper.getMainLooper()))
+            input = process.requireStdin().openWriteChannel(Handler(Looper.getMainLooper()))
             input.writeFully(command.encodeToByteArray())
             input.flushAndClose()
             return process
