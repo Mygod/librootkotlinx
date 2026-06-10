@@ -10,6 +10,8 @@ import be.mygod.librootkotlinx.Logger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.CoroutineContext
@@ -86,7 +88,9 @@ internal class RootServiceConnection(
                         "'Always install with package manager' option in Android Studio.")
                 rootProcess.run(rootServiceConnected, rootLifecycleCoroutineContext)
             } catch (e: Throwable) {
-                if (e !is CancellationException) onStartupFailed(this@RootServiceConnection, e)
+                if (e is CancellationException) throw e
+                currentCoroutineContext().ensureActive()
+                onStartupFailed(this@RootServiceConnection, e)
             }
         }
     }
