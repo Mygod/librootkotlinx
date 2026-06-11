@@ -41,17 +41,13 @@ abstract class RootSession {
     protected open val niceName get() = "${context.packageName}:librootkotlinx:${android.os.Process.myUid() / 100000}"
 
     /**
-     * Handles the root app_process lifecycle and observed stdin/stdout/stderr.
+     * Handles the root app_process lifecycle.
      *
-     * This is called after the root command service has connected. Keep it suspended while the descriptors should
-     * stay open. Returning only ends lifecycle handling.
-     *
-     * The [rootProcess] includes the local `su` [Process], raw ownership-socket peer credentials, and stdio descriptors.
-     * Its [RootProcess.process] exit status is best-effort diagnostic data; daemon/proxy `su` implementations can
-     * synthesize it instead of reporting the root JVM's real exit status or signal.
+     * This is called after the root command service has connected. Keep it suspended while the root process should stay
+     * attached to its root shell session. Returning only ends lifecycle handling. The default implementation drains
+     * [RootProcess.stdout] and [RootProcess.stderr] as diagnostics.
      */
     protected open suspend fun handleRootLifecycle(rootProcess: RootProcess) {
-        rootProcess.stdin.close()
         val handler = Handler(Looper.getMainLooper())
         coroutineScope {
             launch { rootProcess.stdout.openReadChannel(handler).useLines(Logger.me::i) }

@@ -6,6 +6,7 @@ import android.os.Looper
 import be.mygod.librootkotlinx.Logger
 import be.mygod.librootkotlinx.RootProcess
 import be.mygod.librootkotlinx.io.FileDescriptorByteReadChannel
+import be.mygod.librootkotlinx.io.ProcessPipes
 import be.mygod.librootkotlinx.io.awaitExit
 import be.mygod.librootkotlinx.io.openReadChannel
 import be.mygod.librootkotlinx.io.useLines
@@ -53,8 +54,8 @@ internal class RootProcessHandle(
     )
 
     suspend fun run(rootServiceConnected: Job, rootLifecycleCoroutineContext: CoroutineContext) = coroutineScope {
-        val pipes = RootProcessPipes()
-        var handlerStdio: RootProcessHandlerStdio? = null
+        val marker = RootProcessStartupMarker()
+        var rootProcess: ProcessPipes? = null
         val diagnosticChannels = ArrayList<FileDescriptorByteReadChannel>(2)
         val diagnosticDrains = ArrayList<Job>(2)
         suspend fun cancelDiagnostics() {
@@ -67,9 +68,15 @@ internal class RootProcessHandle(
             diagnosticChannels.clear()
         }
         try {
-            val stdio = pipes.takeHandlerStdio().also { handlerStdio = it }
+            val process = launcher.launch(marker).also {
+                ownedProcess.set(it.process)
+                rootProcess = it
+            }
             val handler = Handler(Looper.getMainLooper())
-            for ((descriptor, log) in listOf(stdio.stdout to Logger.me::i, stdio.stderr to Logger.me::e)) {
+            for ((descriptor, log) in listOf(
+                process.requireStdout() to Logger.me::i,
+                process.requireStderr() to Logger.me::e,
+            )) {
                 val channel = descriptor.dup().openReadChannel(handler)
                 diagnosticChannels += channel
                 diagnosticDrains += launch {
@@ -82,8 +89,6 @@ internal class RootProcessHandle(
                     }
                 }
             }
-            val process = launcher.launch(pipes).also { ownedProcess.set(it.process) }
-            pipes.closeRemaining()
             val ownershipAccepted = async { ownership.accept() }
             val startupDiagnosticDrains = diagnosticDrains.toList()
             val startupStdioClosed = async {
@@ -101,9 +106,8 @@ internal class RootProcessHandle(
             launch(rootLifecycleCoroutineContext) {
                 if (ownedProcess.getAndSet(null) == null) return@launch
                 try {
-                    handleRootLifecycle(
-                        RootProcess(process.process, peerCredentials, stdio.stdin, stdio.stdout, stdio.stderr),
-                    )
+                    handleRootLifecycle(RootProcess(process.process, peerCredentials,
+                        process.requireStdin(), process.requireStdout(), process.requireStderr()))
                 } catch (e: CancellationException) {
                     if (!currentCoroutineContext().isActive) throw e
                     Logger.me.w("Root lifecycle handling cancelled", e)
@@ -111,13 +115,13 @@ internal class RootProcessHandle(
                     Logger.me.w("Root lifecycle handling failed", e)
                 }
             }.invokeOnCompletion {
-                stdio.close()
+                process.closeStdio()
             }
-            handlerStdio = null
+            rootProcess = null
         } finally {
             cancelDiagnostics()
-            withContext(NonCancellable) { handlerStdio?.close() }
-            pipes.closeRemaining()
+            withContext(NonCancellable) { rootProcess?.closeStdio() }
+            marker.close()
         }
     }
 

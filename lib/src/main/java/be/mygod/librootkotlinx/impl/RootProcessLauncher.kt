@@ -12,7 +12,6 @@ import be.mygod.librootkotlinx.io.openWriteChannel
 import be.mygod.librootkotlinx.io.startPipes
 import be.mygod.librootkotlinx.io.useLines
 import io.ktor.utils.io.ByteReadChannel
-import io.ktor.utils.io.ByteWriteChannel
 import io.ktor.utils.io.readLine
 import io.ktor.utils.io.writeFully
 import kotlinx.coroutines.async
@@ -28,8 +27,9 @@ import java.util.UUID
  * Builds and executes the root shell command that turns the shell process into the owned root app_process.
  *
  * This owns libsu RootServiceManager's app_process command contract instead of rewriting libsu's generated command.
- * The command keeps the base APK as the initial bootstrap classpath entry, redirects app_process stdio to app-owned
- * pipes, and writes a marker to a dedicated marker pipe after setup succeeds and immediately before app_process.
+ * The command keeps the base APK as the initial bootstrap classpath entry, leaves app_process stdio attached to the
+ * root shell session, and writes a marker to a dedicated marker pipe after setup succeeds and immediately before
+ * app_process.
  *
  * libsu source:
  * https://github.com/topjohnwu/libsu/blob/4910d8dcc1ea3273246614b356fba56e1ce002a5/service/src/main/java/com/topjohnwu/superuser/internal/RootServiceManager.java#L191-L233
@@ -43,16 +43,13 @@ internal class RootProcessLauncher(
     private val handoffAuthority: String,
     private val handoffToken: String,
 ) {
-    suspend fun launch(pipes: RootProcessPipes): ProcessPipes {
+    suspend fun launch(marker: RootProcessStartupMarker): ProcessPipes {
         val rootShell = executeRootShell(
             buildStartupCommand(
                 packageName = packageName,
                 packageCodePath = packageCodePath,
                 niceName = niceName,
-                stdinPath = pipes.stdinPath,
-                stdoutPath = pipes.stdoutPath,
-                stderrPath = pipes.stderrPath,
-                markerPath = pipes.markerPath,
+                markerPath = marker.markerPath,
                 ownershipSocketName = ownershipSocketName,
                 handoffAuthority = handoffAuthority,
                 handoffToken = handoffToken,
@@ -62,7 +59,7 @@ internal class RootProcessLauncher(
             ),
         )
         var startupComplete = false
-        val channel = pipes.openMarkerReadChannel()
+        val channel = marker.openMarkerReadChannel()
         val diagnostics = StringBuilder()
         val diagnosticsSuffix = {
             synchronized(diagnostics) {
@@ -75,18 +72,18 @@ internal class RootProcessLauncher(
             var shellErrorChannel: ByteReadChannel? = null
             try {
                 val handler = Handler(Looper.getMainLooper())
-                val shellOutputPipe = rootShell.requireStdout().openReadChannel(handler)
+                val shellOutputPipe = rootShell.requireStdout().dup().openReadChannel(handler)
                 shellOutputChannel = shellOutputPipe
-                val shellErrorPipe = rootShell.requireStderr().openReadChannel(handler)
+                val shellErrorPipe = rootShell.requireStderr().dup().openReadChannel(handler)
                 shellErrorChannel = shellErrorPipe
                 coroutineScope {
                     val shellOutput = async { shellOutputPipe.drainStartupDiagnostics(diagnostics) }
                     val shellError = async { shellErrorPipe.drainStartupDiagnostics(diagnostics) }
                     val diagnosticsClosed = async { listOfNotNull(shellOutput.await(), shellError.await()) }
-                    val marker = async { channel.readLine() }
+                    val markerLine = async { channel.readLine() }
                     try {
                         select<Unit> {
-                            marker.onAwait { line ->
+                            markerLine.onAwait { line ->
                                 when (line) {
                                     STARTUP_MARKER_STARTED -> startupComplete = true
                                     null -> throw NoShellException(
@@ -98,8 +95,8 @@ internal class RootProcessLauncher(
                                 }
                             }
                             diagnosticsClosed.onAwait { drainFailures ->
-                                pipes.closeMarkerWrite()
-                                when (val line = marker.await()) {
+                                marker.closeMarkerWrite()
+                                when (val line = markerLine.await()) {
                                     STARTUP_MARKER_STARTED -> startupComplete = true
                                     null -> throw NoShellException("Root shell exited unexpectedly with code ${
                                         rootShell.process.awaitExit()}${diagnosticsSuffix()}").also { failure ->
@@ -112,10 +109,10 @@ internal class RootProcessLauncher(
                             }
                         }
                     } finally {
-                        pipes.closeMarkerWrite()
+                        marker.closeMarkerWrite()
                         shellOutputPipe.cancel(null)
                         shellErrorPipe.cancel(null)
-                        marker.cancelAndJoin()
+                        markerLine.cancelAndJoin()
                         diagnosticsClosed.cancelAndJoin()
                         shellOutput.cancelAndJoin()
                         shellError.cancelAndJoin()
@@ -150,14 +147,13 @@ internal class RootProcessLauncher(
 
     private suspend fun executeRootShell(command: String): ProcessPipes {
         val process = startRootShell()
-        var input: ByteWriteChannel? = null
+        val channel = process.requireStdin().dup().openWriteChannel(Handler(Looper.getMainLooper()))
         try {
-            input = process.requireStdin().openWriteChannel(Handler(Looper.getMainLooper()))
-            input.writeFully(command.encodeToByteArray())
-            input.flushAndClose()
+            command.encodeToByteArray().let { channel.writeFully(it, 0, it.size) }
+            channel.flushAndClose()
             return process
         } catch (e: Throwable) {
-            input?.cancel(e)
+            channel.cancel(e)
             throw when (e) {
                 is IOException, is ErrnoException -> NoShellException("Root shell died before root service startup", e)
                 else -> e
@@ -211,9 +207,6 @@ internal class RootProcessLauncher(
             packageName: String,
             packageCodePath: String,
             niceName: String,
-            stdinPath: String,
-            stdoutPath: String,
-            stderrPath: String,
             markerPath: String,
             ownershipSocketName: String,
             handoffAuthority: String,
@@ -238,13 +231,9 @@ internal class RootProcessLauncher(
                 appProcess = "runcon u:r:su:s0 ${AppProcess.quote(executable)}",
                 niceName = niceName,
             )
-            val launchSuffix = "$packageName $userId $ownershipSocketName $handoffAuthority ${
-                handoffToken} <&4 >&5 2>&6 4<&- 5>&- 6>&-"
+            val args = " $packageName $userId $ownershipSocketName $handoffAuthority $handoffToken"
             return buildString {
                 appendLine("exec 3>$markerPath || exit 1")
-                appendLine("exec 4<$stdinPath || exit 1")
-                appendLine("exec 5>$stdoutPath || exit 1")
-                appendLine("exec 6>$stderrPath || exit 1")
                 append(relocationScript)
                 // PHH Superuser starts commands in phhsu_daemon, which blocks app-to-root Binder; see:
                 // https://github.com/Mygod/VPNHotspot/issues/753
@@ -254,9 +243,9 @@ internal class RootProcessLauncher(
                 appendLine("printf '%s\\n' $STARTUP_MARKER_STARTED >&3 || exit 1")
                 appendLine("exec 3>&-")
                 appendLine($$"if [ \"$phh_runcon\" = 1 ]; then")
-                appendLine("  $phhLaunch $launchSuffix")
+                appendLine("  $phhLaunch$args")
                 appendLine("else")
-                appendLine("  $launch $launchSuffix")
+                appendLine("  $launch$args")
                 appendLine("fi")
             }
         }

@@ -51,6 +51,13 @@ class ProcessPipes internal constructor(
     fun requireStderr(): ParcelFileDescriptor = checkNotNull(stderr) { "stderr pipe was not requested" }
 
     override fun close() {
+        try {
+            closeStdio()
+        } finally {
+            process.destroy()
+        }
+    }
+    internal fun closeStdio() {
         var failure: IOException? = null
         fun ParcelFileDescriptor?.closeOwned() {
             this ?: return
@@ -60,13 +67,9 @@ class ProcessPipes internal constructor(
                 failure?.addSuppressed(e) ?: run { failure = e }
             }
         }
-        try {
-            stdin.closeOwned()
-            stdout.closeOwned()
-            stderr.closeOwned()
-        } finally {
-            process.destroy()
-        }
+        stdin.closeOwned()
+        stdout.closeOwned()
+        stderr.closeOwned()
         failure?.let { throw it }
     }
 }
