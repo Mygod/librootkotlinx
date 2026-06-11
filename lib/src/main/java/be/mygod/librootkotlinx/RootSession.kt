@@ -44,8 +44,14 @@ abstract class RootSession {
     /**
      * Handles the root app_process lifecycle and observed stdin/stdout/stderr.
      *
-     * This is called after the root command service has connected. Keep it suspended while the descriptors should stay
-     * open. Returning only ends lifecycle handling.
+     * This is called after the root command service has connected. Keep it suspended while the descriptors should
+     * stay open. Returning only ends lifecycle handling.
+     *
+     * The [process] is the local `su` process started by this library. Depending on the root implementation, it may
+     * be the same process as the root `app_process` after an exec-in-place transition, or it may be a proxy client for
+     * a privileged daemon that runs the root `app_process` elsewhere. In the proxy case, [Process.waitFor] and
+     * `awaitExit()` can report a daemon/client-synthesized status instead of the root JVM's real exit status or
+     * signal. Treat that exit code as best-effort diagnostic data, not as the authoritative service lifecycle signal.
      */
     protected open suspend fun handleRootLifecycle(
         process: Process,
