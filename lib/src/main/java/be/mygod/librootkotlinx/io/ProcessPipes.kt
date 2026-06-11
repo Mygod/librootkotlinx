@@ -51,26 +51,10 @@ class ProcessPipes internal constructor(
     fun requireStderr(): ParcelFileDescriptor = checkNotNull(stderr) { "stderr pipe was not requested" }
 
     override fun close() {
-        try {
-            closeStdio()
-        } finally {
-            process.destroy()
-        }
-    }
-    internal fun closeStdio() {
-        var failure: IOException? = null
-        fun ParcelFileDescriptor?.closeOwned() {
-            this ?: return
-            try {
-                close()
-            } catch (e: IOException) {
-                failure?.addSuppressed(e) ?: run { failure = e }
-            }
-        }
-        stdin.closeOwned()
-        stdout.closeOwned()
-        stderr.closeOwned()
-        failure?.let { throw it }
+        stdin?.close()
+        stdout?.close()
+        stderr?.close()
+        process.destroy()
     }
 }
 
@@ -108,9 +92,9 @@ fun ProcessBuilder.startPipes(
         ProcessPipes(process, stdinPipe?.get(1), stdoutPipe?.get(0), stderrPipe?.get(0))
     } catch (e: Throwable) {
         process?.destroy()
-        stdinPipe?.forEach { it.close(e) }
-        stdoutPipe?.forEach { it.close(e) }
-        stderrPipe?.forEach { it.close(e) }
+        stdinPipe?.forEach { it.close() }
+        stdoutPipe?.forEach { it.close() }
+        stderrPipe?.forEach { it.close() }
         throw e
     }
 } else {
@@ -134,9 +118,9 @@ fun ProcessBuilder.startPipes(
         ProcessPipes(process, pfdin, pfdout, pfderr)
     } catch (e: Throwable) {
         process.destroy()
-        pfdin?.close(e)
-        pfdout?.close(e)
-        pfderr?.close(e)
+        pfdin?.close()
+        pfdout?.close()
+        pfderr?.close()
         throw e
     }
 }
@@ -160,12 +144,6 @@ private fun InputStream.fileDescriptor(): FileDescriptor = when (this) {
 private fun OutputStream.fileDescriptor(): FileDescriptor = when (this) {
     is FileOutputStream -> fd
     else -> processOutputStreamFd[this] as FileDescriptor
-}
-
-private fun ParcelFileDescriptor.close(cause: Throwable) = try {
-    close()
-} catch (e: IOException) {
-    cause.addSuppressed(e)
 }
 
 private val unixProcessPid by lazy {
@@ -196,11 +174,7 @@ private suspend fun awaitPid(pid: Int) {
             awaiter.close()
         }
     } finally {
-        try {
-            Os.close(fd)
-        } catch (e: ErrnoException) {
-            Logger.me.w("Failed to close pidfd", e)
-        }
+        Os.close(fd)
     }
 }
 /**

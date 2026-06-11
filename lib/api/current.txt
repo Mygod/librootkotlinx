@@ -285,14 +285,14 @@ package be.mygod.librootkotlinx {
   public final class RootProcess {
     method @InaccessibleFromKotlin public android.net.Credentials getPeerCredentials();
     method @InaccessibleFromKotlin public Process getProcess();
-    method @InaccessibleFromKotlin public android.os.ParcelFileDescriptor getStderr();
-    method @InaccessibleFromKotlin public android.os.ParcelFileDescriptor getStdin();
-    method @InaccessibleFromKotlin public android.os.ParcelFileDescriptor getStdout();
+    method @InaccessibleFromKotlin public be.mygod.librootkotlinx.io.FileDescriptorByteReadChannel getStderr();
+    method @InaccessibleFromKotlin public io.ktor.utils.io.ByteWriteChannel getStdin();
+    method @InaccessibleFromKotlin public be.mygod.librootkotlinx.io.FileDescriptorByteReadChannel getStdout();
     property public android.net.Credentials peerCredentials;
     property public Process process;
-    property public android.os.ParcelFileDescriptor stderr;
-    property public android.os.ParcelFileDescriptor stdin;
-    property public android.os.ParcelFileDescriptor stdout;
+    property public be.mygod.librootkotlinx.io.FileDescriptorByteReadChannel stderr;
+    property public io.ktor.utils.io.ByteWriteChannel stdin;
+    property public be.mygod.librootkotlinx.io.FileDescriptorByteReadChannel stdout;
   }
 
   public final class RootServer {

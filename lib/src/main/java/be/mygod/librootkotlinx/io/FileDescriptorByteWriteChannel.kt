@@ -19,7 +19,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.android.asCoroutineDispatcher
 import kotlinx.coroutines.async
 import java.io.FileDescriptor
-import java.io.IOException
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -38,7 +37,6 @@ internal abstract class FileDescriptorWriteChannel(
     init {
         fileDescriptor.isNonblocking = true
         drainJob = CoroutineScope(handler.asCoroutineDispatcher("pfd-writer")).async {
-            var failure: Throwable? = null
             try {
                 while (true) {
                     val count = channel.readAvailable(buffer)
@@ -71,24 +69,19 @@ internal abstract class FileDescriptorWriteChannel(
                     }
                 }
             } catch (e: CancellationException) {
-                failure = e
                 throw e
             } catch (e: Exception) {
-                failure = e
                 channel.cancel(e)
                 throw e
             } finally {
-                closeDescriptorOnce()?.let { closeError ->
-                    failure?.addSuppressed(closeError) ?: throw closeError
-                }
+                closeDescriptorOnce()
             }
         }
     }
 
     override fun cancel(cause: Throwable?) {
-        val closeError = closeDescriptorOnce()
-        if (cause != null && closeError != null) cause.addSuppressed(closeError)
-        channel.cancel(cause ?: closeError)
+        closeDescriptorOnce()
+        channel.cancel(cause)
         drainJob.cancel()
     }
 
@@ -105,15 +98,10 @@ internal abstract class FileDescriptorWriteChannel(
         }
     }
 
-    private fun closeDescriptorOnce(): IOException? {
-        if (!closed.compareAndSet(false, true)) return null
+    private fun closeDescriptorOnce() {
+        if (!closed.compareAndSet(false, true)) return
         closeEvents()
-        return try {
-            closeDescriptor()
-            null
-        } catch (e: IOException) {
-            e
-        }
+        closeDescriptor()
     }
 
     protected open fun closeEvents() = eventAwaiter.close()
@@ -152,12 +140,6 @@ fun FileDescriptor.openWriteChannel(
     val awaiter = FileDescriptorEventAwaiter(this, handler.looper.queue)
     return object : FileDescriptorWriteChannel(this, handler, buffer) {
         override val eventAwaiter get() = awaiter
-        override fun closeDescriptor() {
-            try {
-                Os.close(this@openWriteChannel)
-            } catch (e: ErrnoException) {
-                throw IOException(e)
-            }
-        }
+        override fun closeDescriptor() = Os.close(this@openWriteChannel)
     }
 }

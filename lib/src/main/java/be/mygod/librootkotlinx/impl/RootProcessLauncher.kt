@@ -7,11 +7,9 @@ import android.system.ErrnoException
 import be.mygod.librootkotlinx.NoShellException
 import be.mygod.librootkotlinx.io.ProcessPipes
 import be.mygod.librootkotlinx.io.awaitExit
-import be.mygod.librootkotlinx.io.openReadChannel
+import be.mygod.librootkotlinx.io.openUnboundedReadChannel
 import be.mygod.librootkotlinx.io.openWriteChannel
 import be.mygod.librootkotlinx.io.startPipes
-import be.mygod.librootkotlinx.io.useLines
-import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.readLine
 import io.ktor.utils.io.writeFully
 import kotlinx.coroutines.async
@@ -43,8 +41,8 @@ internal class RootProcessLauncher(
     private val handoffAuthority: String,
     private val handoffToken: String,
 ) {
-    suspend fun launch(marker: RootProcessStartupMarker): ProcessPipes {
-        val rootShell = executeRootShell(
+    suspend fun launch(marker: RootProcessStartupMarker): RootProcessPipes {
+        val pipes = executeRootShell(
             buildStartupCommand(
                 packageName = packageName,
                 packageCodePath = packageCodePath,
@@ -58,113 +56,73 @@ internal class RootProcessLauncher(
                 relocationToken = if (Build.VERSION.SDK_INT < 26) relocationToken() else "",
             ),
         )
-        var startupComplete = false
-        val channel = marker.openMarkerReadChannel()
-        val diagnostics = StringBuilder()
-        val diagnosticsSuffix = {
-            synchronized(diagnostics) {
-                val trimmed = diagnostics.toString().trim()
-                if (trimmed.isEmpty()) "" else ": $trimmed"
-            }
-        }
         try {
-            var shellOutputChannel: ByteReadChannel? = null
-            var shellErrorChannel: ByteReadChannel? = null
+            val channel = marker.openMarkerReadChannel()
             try {
-                val handler = Handler(Looper.getMainLooper())
-                val shellOutputPipe = rootShell.requireStdout().dup().openReadChannel(handler)
-                shellOutputChannel = shellOutputPipe
-                val shellErrorPipe = rootShell.requireStderr().dup().openReadChannel(handler)
-                shellErrorChannel = shellErrorPipe
-                coroutineScope {
-                    val shellOutput = async { shellOutputPipe.drainStartupDiagnostics(diagnostics) }
-                    val shellError = async { shellErrorPipe.drainStartupDiagnostics(diagnostics) }
-                    val diagnosticsClosed = async { listOfNotNull(shellOutput.await(), shellError.await()) }
+                val line = coroutineScope {
                     val markerLine = async { channel.readLine() }
+                    val exited = async { pipes.process.awaitExit() }
                     try {
-                        select<Unit> {
-                            markerLine.onAwait { line ->
-                                when (line) {
-                                    STARTUP_MARKER_STARTED -> startupComplete = true
-                                    null -> throw NoShellException(
-                                        "Root shell marker pipe closed${diagnosticsSuffix()}",
-                                    )
-                                    else -> throw NoShellException(
-                                        "Unexpected root shell startup marker: $line${diagnosticsSuffix()}",
-                                    )
-                                }
-                            }
-                            diagnosticsClosed.onAwait { drainFailures ->
+                        select {
+                            markerLine.onAwait { it }
+                            exited.onAwait { code ->
+                                // The shell can write no more after exiting, so closing the last marker write end
+                                // settles the marker read deterministically.
                                 marker.closeMarkerWrite()
-                                when (val line = markerLine.await()) {
-                                    STARTUP_MARKER_STARTED -> startupComplete = true
-                                    null -> throw NoShellException("Root shell exited unexpectedly with code ${
-                                        rootShell.process.awaitExit()}${diagnosticsSuffix()}").also { failure ->
-                                            drainFailures.forEach(failure::addSuppressed)
-                                        }
-                                    else -> throw NoShellException(
-                                        "Unexpected root shell startup marker: $line${diagnosticsSuffix()}",
-                                    ).also { failure -> drainFailures.forEach(failure::addSuppressed) }
-                                }
+                                markerLine.await() ?: throw NoShellException(
+                                    "Root shell exited unexpectedly with code $code${pipes.diagnosticsSuffix()}")
                             }
                         }
                     } finally {
-                        marker.closeMarkerWrite()
-                        shellOutputPipe.cancel(null)
-                        shellErrorPipe.cancel(null)
                         markerLine.cancelAndJoin()
-                        diagnosticsClosed.cancelAndJoin()
-                        shellOutput.cancelAndJoin()
-                        shellError.cancelAndJoin()
+                        exited.cancelAndJoin()
                     }
+                }
+                when (line) {
+                    STARTUP_MARKER_STARTED -> { }
+                    null -> throw NoShellException("Root shell marker pipe closed${pipes.diagnosticsSuffix()}")
+                    else -> throw NoShellException(
+                        "Unexpected root shell startup marker: $line${pipes.diagnosticsSuffix()}")
                 }
             } catch (e: IOException) {
                 throw NoShellException("Root service startup marker read failed", e)
             } finally {
-                shellOutputChannel?.cancel(null)
-                shellErrorChannel?.cancel(null)
+                marker.closeMarkerWrite()
                 channel.cancel(null)
             }
-            return rootShell
-        } finally {
-            if (!startupComplete) rootShell.close()
-        }
-    }
-
-    private suspend fun ByteReadChannel.drainStartupDiagnostics(diagnostics: StringBuilder) = try {
-        useLines { line ->
-            synchronized(diagnostics) {
-                diagnostics.appendLine(line)
-                if (diagnostics.length > MAX_STARTUP_DIAGNOSTICS_LENGTH) {
-                    diagnostics.delete(0, diagnostics.length - MAX_STARTUP_DIAGNOSTICS_LENGTH)
-                }
-            }
-        }
-        null
-    } catch (e: IOException) {
-        e
-    }
-
-    private suspend fun executeRootShell(command: String): ProcessPipes {
-        val process = startRootShell()
-        val channel = process.requireStdin().dup().openWriteChannel(Handler(Looper.getMainLooper()))
-        try {
-            command.encodeToByteArray().let { channel.writeFully(it, 0, it.size) }
-            channel.flushAndClose()
-            return process
+            return pipes
         } catch (e: Throwable) {
-            channel.cancel(e)
+            pipes.close()
+            throw e
+        }
+    }
+
+    private suspend fun executeRootShell(command: String): RootProcessPipes {
+        val process = startRootShell()
+        val pipes = try {
+            val handler = Handler(Looper.getMainLooper())
+            RootProcessPipes(
+                process.process,
+                process.requireStdin().openWriteChannel(handler),
+                process.requireStdout().openUnboundedReadChannel(handler),
+                process.requireStderr().openUnboundedReadChannel(handler),
+            )
+        } catch (e: Throwable) {
+            process.close()
+            throw e
+        }
+        try {
+            // Leave stdin open after the command: the marker confirms delivery, and the root app_process inherits it.
+            pipes.stdin.writeFully(command.encodeToByteArray())
+            pipes.stdin.flush()
+        } catch (e: Throwable) {
+            pipes.close()
             throw when (e) {
                 is IOException, is ErrnoException -> NoShellException("Root shell died before root service startup", e)
                 else -> e
-            }.apply {
-                try {
-                    process.close()
-                } catch (close: IOException) {
-                    addSuppressed(close)
-                }
             }
         }
+        return pipes
     }
 
     private fun startRootShell(): ProcessPipes {
@@ -201,7 +159,6 @@ internal class RootProcessLauncher(
             "su",
         )
         private const val STARTUP_MARKER_STARTED = "librootkotlinx-started"
-        private const val MAX_STARTUP_DIAGNOSTICS_LENGTH = 1024 * 1024
 
         fun buildStartupCommand(
             packageName: String,

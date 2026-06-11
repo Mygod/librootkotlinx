@@ -1,11 +1,8 @@
 package be.mygod.librootkotlinx
 
 import android.content.Context
-import android.os.Handler
-import android.os.Looper
 import androidx.annotation.CallSuper
 import be.mygod.librootkotlinx.io.useLines
-import be.mygod.librootkotlinx.io.openReadChannel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
@@ -48,10 +45,9 @@ abstract class RootSession {
      * [RootProcess.stdout] and [RootProcess.stderr] as diagnostics.
      */
     protected open suspend fun handleRootLifecycle(rootProcess: RootProcess) {
-        val handler = Handler(Looper.getMainLooper())
         coroutineScope {
-            launch { rootProcess.stdout.openReadChannel(handler).useLines(Logger.me::i) }
-            launch { rootProcess.stderr.openReadChannel(handler).useLines(Logger.me::e) }
+            launch { rootProcess.stdout.useLines(Logger.me::i) }
+            launch { rootProcess.stderr.useLines(Logger.me::e) }
         }
     }
 

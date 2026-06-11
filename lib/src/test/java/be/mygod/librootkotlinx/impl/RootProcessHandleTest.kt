@@ -19,39 +19,39 @@ import java.io.IOException
 @OptIn(ExperimentalCoroutinesApi::class)
 class RootProcessHandleTest {
     @Test
-    fun startupStdioClosedBeforeOwnershipFailsStartup() = runTest {
+    fun processExitBeforeOwnershipFailsStartup() = runTest {
         supervisorScope {
             val ownershipAccepted = CompletableDeferred<Credentials>()
-            val startupStdioClosed = CompletableDeferred<Unit>()
+            val processExited = CompletableDeferred<Int>()
             val startup = async {
-                RootProcessHandle.awaitRootStartup(Job(), ownershipAccepted, startupStdioClosed) { 9 }
+                RootProcessHandle.awaitRootStartup(Job(), ownershipAccepted, processExited) { ": diagnostics" }
             }
 
             runCurrent()
-            startupStdioClosed.complete(Unit)
+            processExited.complete(9)
 
             assertEquals(
-                "Root process stdout/stderr closed before ownership accepted with exit code 9",
+                "Root process exited with code 9 before ownership accepted: diagnostics",
                 awaitIOException(startup).message,
             )
         }
     }
 
     @Test
-    fun startupStdioClosedBeforeConnectionFailsStartup() = runTest {
+    fun processExitBeforeConnectionFailsStartup() = runTest {
         supervisorScope {
             val ownershipAccepted = CompletableDeferred<Credentials>()
-            val startupStdioClosed = CompletableDeferred<Unit>()
+            val processExited = CompletableDeferred<Int>()
             val startup = async {
-                RootProcessHandle.awaitRootStartup(Job(), ownershipAccepted, startupStdioClosed) { 7 }
+                RootProcessHandle.awaitRootStartup(Job(), ownershipAccepted, processExited) { ": diagnostics" }
             }
 
             ownershipAccepted.complete(Credentials(123, 0, 0))
             runCurrent()
-            startupStdioClosed.complete(Unit)
+            processExited.complete(7)
 
             assertEquals(
-                "Root process stdout/stderr closed before root service connected with exit code 7",
+                "Root process exited with code 7 before root service connected: diagnostics",
                 awaitIOException(startup).message,
             )
         }
@@ -62,12 +62,13 @@ class RootProcessHandleTest {
         supervisorScope {
             val rootServiceConnected = Job()
             val ownershipAccepted = CompletableDeferred<Credentials>()
-            val startupStdioClosed = CompletableDeferred<Unit>()
+            val processExited = CompletableDeferred<Int>()
             val credentials = Credentials(123, 0, 0)
-            var awaitFailureExitCalls = 0
+            var diagnosticsCalls = 0
             val startup = async {
-                RootProcessHandle.awaitRootStartup(rootServiceConnected, ownershipAccepted, startupStdioClosed) {
-                    ++awaitFailureExitCalls
+                RootProcessHandle.awaitRootStartup(rootServiceConnected, ownershipAccepted, processExited) {
+                    ++diagnosticsCalls
+                    ""
                 }
             }
 
@@ -76,7 +77,7 @@ class RootProcessHandleTest {
             rootServiceConnected.complete()
 
             assertEquals(credentials, startup.await())
-            assertEquals(0, awaitFailureExitCalls)
+            assertEquals(0, diagnosticsCalls)
         }
     }
 
@@ -85,18 +86,19 @@ class RootProcessHandleTest {
         supervisorScope {
             val rootServiceConnected = Job().also { it.cancel(CancellationException("server closed")) }
             val ownershipAccepted = CompletableDeferred<Credentials>()
-            val startupStdioClosed = CompletableDeferred<Unit>()
-            var awaitFailureExitCalls = 0
+            val processExited = CompletableDeferred<Int>()
+            var diagnosticsCalls = 0
             val startup = async {
-                RootProcessHandle.awaitRootStartup(rootServiceConnected, ownershipAccepted, startupStdioClosed) {
-                    ++awaitFailureExitCalls
+                RootProcessHandle.awaitRootStartup(rootServiceConnected, ownershipAccepted, processExited) {
+                    ++diagnosticsCalls
+                    ""
                 }
             }
 
             ownershipAccepted.complete(Credentials(123, 0, 0))
 
             assertEquals("server closed", awaitCancellation(startup).message)
-            assertEquals(0, awaitFailureExitCalls)
+            assertEquals(0, diagnosticsCalls)
         }
     }
 

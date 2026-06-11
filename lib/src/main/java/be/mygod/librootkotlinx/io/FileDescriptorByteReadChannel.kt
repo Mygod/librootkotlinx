@@ -14,6 +14,7 @@ import android.system.Os
 import android.system.OsConstants
 import io.ktor.utils.io.ByteChannel
 import io.ktor.utils.io.ByteReadChannel
+import io.ktor.utils.io.InternalAPI
 import io.ktor.utils.io.readLine
 import io.ktor.utils.io.writeFully
 import kotlinx.coroutines.CancellationException
@@ -24,7 +25,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.FileDescriptor
-import java.io.IOException
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -44,6 +44,7 @@ internal abstract class FileDescriptorByteReadChannelImpl(
     private val fileDescriptor: FileDescriptor,
     handler: Handler,
     private val buffer: ByteArray,
+    private val unbounded: Boolean = false,
     private val channel: ByteChannel = ByteChannel(autoFlush = true),
 ) : FileDescriptorByteReadChannel, ByteReadChannel by channel {
     private val closed = AtomicBoolean()
@@ -89,6 +90,7 @@ internal abstract class FileDescriptorByteReadChannelImpl(
     /**
      * @return true if reading stopped because the descriptor would block, false after EOF/close.
      */
+    @OptIn(InternalAPI::class)
     private suspend fun drainAvailable(): Boolean = drainLock.withLock {
         while (!channel.isClosedForWrite) {
             val count = try {
@@ -114,33 +116,23 @@ internal abstract class FileDescriptorByteReadChannelImpl(
                 complete()
                 return false
             }
-            channel.writeFully(buffer, 0, count)
+            if (unbounded) {
+                channel.writeBuffer.write(buffer, 0, count)
+                channel.flushWriteBuffer()
+            } else channel.writeFully(buffer, 0, count)
         }
         false
     }
 
     private fun complete(cause: Throwable? = null) {
-        val closeError = if (!closed.compareAndSet(false, true)) null else {
+        if (closed.compareAndSet(false, true)) {
             closeEvents()
-            try {
-                closeDescriptor()
-                null
-            } catch (e: IOException) {
-                e
-            }
+            closeDescriptor()
         }
-        if (cause == null) {
-            if (closeError == null) {
-                if (!channel.isClosedForWrite) channel.close()
-            } else {
-                drainFailure = closeError
-                channel.cancel(closeError)
-            }
-        } else {
-            if (closeError != null) cause.addSuppressed(closeError)
+        if (cause != null) {
             drainFailure = cause
             channel.cancel(cause)
-        }
+        } else if (!channel.isClosedForWrite) channel.close()
     }
 
     protected abstract fun closeDescriptor()
@@ -165,6 +157,17 @@ fun ParcelFileDescriptor.openReadChannel(
     }
 }
 
+internal fun ParcelFileDescriptor.openUnboundedReadChannel(
+    handler: Handler,
+    buffer: ByteArray = ByteArray(DEFAULT_BUFFER_SIZE),
+): FileDescriptorByteReadChannel {
+    val awaiter = FileDescriptorEventAwaiter(fileDescriptor, handler.looper.queue)
+    return object : FileDescriptorByteReadChannelImpl(fileDescriptor, handler, buffer, unbounded = true) {
+        override val eventAwaiter get() = awaiter
+        override fun closeDescriptor() = close()
+    }
+}
+
 /**
  * Opens a read channel that owns this [FileDescriptor].
  *
@@ -179,13 +182,7 @@ fun FileDescriptor.openReadChannel(
     val awaiter = FileDescriptorEventAwaiter(this, handler.looper.queue)
     return object : FileDescriptorByteReadChannelImpl(this, handler, buffer) {
         override val eventAwaiter get() = awaiter
-        override fun closeDescriptor() {
-            try {
-                Os.close(this@openReadChannel)
-            } catch (e: ErrnoException) {
-                throw IOException(e)
-            }
-        }
+        override fun closeDescriptor() = Os.close(this@openReadChannel)
     }
 }
 

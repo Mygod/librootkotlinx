@@ -1,10 +1,14 @@
 package be.mygod.librootkotlinx
 
 import android.net.Credentials
-import android.os.ParcelFileDescriptor
+import be.mygod.librootkotlinx.io.FileDescriptorByteReadChannel
+import io.ktor.utils.io.ByteWriteChannel
 
 /**
  * App-side handles and kernel-authenticated identity for one owned root process.
+ *
+ * The stdio channels own their pipe descriptors: cancelling a channel closes its descriptor, and all three channels
+ * are closed automatically after the root lifecycle handler completes.
  */
 class RootProcess internal constructor(
     /**
@@ -21,18 +25,20 @@ class RootProcess internal constructor(
      */
     val peerCredentials: Credentials,
     /**
-     * Root app_process stdin inherited from the root shell session. It is recommended to keep this open since the
-     * overhead is small and system root daemon might use this as a signal for liveliness.
+     * Write channel for root app_process stdin inherited from the root shell session. It is recommended to keep this
+     * open since the overhead is small and system root daemon might use this as a signal for liveliness.
      */
-    val stdin: ParcelFileDescriptor,
+    val stdin: ByteWriteChannel,
     /**
-     * Root app_process stdout inherited from the root shell session. Treat this as diagnostics output; use [RootServer]
-     * APIs or your own IPC channel for structured data.
+     * Read channel for root app_process stdout inherited from the root shell session, carrying all output since the
+     * root shell was started. Treat this as diagnostics output; use [RootServer] APIs or your own IPC channel for
+     * structured data.
      */
-    val stdout: ParcelFileDescriptor,
+    val stdout: FileDescriptorByteReadChannel,
     /**
-     * Root app_process stderr inherited from the root shell session. Treat this as diagnostics output; use [RootServer]
-     * APIs or your own IPC channel for structured data.
+     * Read channel for root app_process stderr inherited from the root shell session, carrying all output since the
+     * root shell was started. Treat this as diagnostics output; use [RootServer] APIs or your own IPC channel for
+     * structured data.
      */
-    val stderr: ParcelFileDescriptor,
+    val stderr: FileDescriptorByteReadChannel,
 )
