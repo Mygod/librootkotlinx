@@ -1,5 +1,6 @@
 package be.mygod.librootkotlinx.impl
 
+import android.net.Credentials
 import android.net.LocalSocket
 import android.net.LocalSocketAddress
 import android.net.LocalServerSocket
@@ -28,14 +29,14 @@ internal class RootProcessOwnership : Closeable {
     private val closed = AtomicBoolean()
     private var socket: ALocalSocket? = null
 
-    suspend fun accept() {
+    suspend fun accept(): Credentials {
         while (true) {
             if (closed.get()) throw CancellationException("Root process ownership closed")
             val accepted = serverSocket.accept()
             try {
-                val uid = accepted.socket.peerCredentials.uid
-                if (uid != 0) {
-                    Logger.me.w("Rejected root process ownership connection from uid=$uid")
+                val peerCredentials = accepted.socket.peerCredentials
+                if (peerCredentials.uid != 0) {
+                    Logger.me.w("Rejected root process ownership connection from uid=${peerCredentials.uid}")
                     close(accepted)
                     continue
                 }
@@ -50,7 +51,7 @@ internal class RootProcessOwnership : Closeable {
                     throw CancellationException("Root process ownership closed")
                 }
                 closeServerSocket()
-                return
+                return peerCredentials
             } catch (e: IOException) {
                 close(accepted)
                 throw e

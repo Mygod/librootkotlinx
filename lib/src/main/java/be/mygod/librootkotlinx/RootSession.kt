@@ -3,7 +3,6 @@ package be.mygod.librootkotlinx
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
-import android.os.ParcelFileDescriptor
 import androidx.annotation.CallSuper
 import be.mygod.librootkotlinx.io.useLines
 import be.mygod.librootkotlinx.io.openReadChannel
@@ -47,23 +46,16 @@ abstract class RootSession {
      * This is called after the root command service has connected. Keep it suspended while the descriptors should
      * stay open. Returning only ends lifecycle handling.
      *
-     * The [process] is the local `su` process started by this library. Depending on the root implementation, it may
-     * be the same process as the root `app_process` after an exec-in-place transition, or it may be a proxy client for
-     * a privileged daemon that runs the root `app_process` elsewhere. In the proxy case, [Process.waitFor] and
-     * `awaitExit()` can report a daemon/client-synthesized status instead of the root JVM's real exit status or
-     * signal. Treat that exit code as best-effort diagnostic data, not as the authoritative service lifecycle signal.
+     * The [rootProcess] includes the local `su` [Process], raw ownership-socket peer credentials, and stdio descriptors.
+     * Its [RootProcess.process] exit status is best-effort diagnostic data; daemon/proxy `su` implementations can
+     * synthesize it instead of reporting the root JVM's real exit status or signal.
      */
-    protected open suspend fun handleRootLifecycle(
-        process: Process,
-        stdin: ParcelFileDescriptor,
-        stdout: ParcelFileDescriptor,
-        stderr: ParcelFileDescriptor,
-    ) {
-        stdin.close()
+    protected open suspend fun handleRootLifecycle(rootProcess: RootProcess) {
+        rootProcess.stdin.close()
         val handler = Handler(Looper.getMainLooper())
         coroutineScope {
-            launch { stdout.openReadChannel(handler).useLines(Logger.me::i) }
-            launch { stderr.openReadChannel(handler).useLines(Logger.me::e) }
+            launch { rootProcess.stdout.openReadChannel(handler).useLines(Logger.me::i) }
+            launch { rootProcess.stderr.openReadChannel(handler).useLines(Logger.me::e) }
         }
     }
 

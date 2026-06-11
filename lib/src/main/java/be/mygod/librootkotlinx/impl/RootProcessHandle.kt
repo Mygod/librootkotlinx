@@ -1,9 +1,10 @@
 package be.mygod.librootkotlinx.impl
 
+import android.net.Credentials
 import android.os.Handler
 import android.os.Looper
-import android.os.ParcelFileDescriptor
 import be.mygod.librootkotlinx.Logger
+import be.mygod.librootkotlinx.RootProcess
 import be.mygod.librootkotlinx.io.FileDescriptorByteReadChannel
 import be.mygod.librootkotlinx.io.awaitExit
 import be.mygod.librootkotlinx.io.openReadChannel
@@ -37,12 +38,7 @@ internal class RootProcessHandle(
     codeCacheDir: () -> File,
     handoffAuthority: String,
     handoffToken: String,
-    private val handleRootLifecycle: suspend (
-        Process,
-        ParcelFileDescriptor,
-        ParcelFileDescriptor,
-        ParcelFileDescriptor,
-    ) -> Unit,
+    private val handleRootLifecycle: suspend (RootProcess) -> Unit,
 ) : Closeable {
     private val ownership = RootProcessOwnership()
     private val ownedProcess = AtomicReference<Process?>()
@@ -93,7 +89,7 @@ internal class RootProcessHandle(
             val startupStdioClosed = async {
                 for (drain in startupDiagnosticDrains) drain.join()
             }
-            try {
+            val peerCredentials = try {
                 awaitRootStartup(rootServiceConnected, ownershipAccepted, startupStdioClosed) {
                     process.process.awaitExit()
                 }
@@ -105,7 +101,9 @@ internal class RootProcessHandle(
             launch(rootLifecycleCoroutineContext) {
                 if (ownedProcess.getAndSet(null) == null) return@launch
                 try {
-                    handleRootLifecycle(process.process, stdio.stdin, stdio.stdout, stdio.stderr)
+                    handleRootLifecycle(
+                        RootProcess(process.process, peerCredentials, stdio.stdin, stdio.stdout, stdio.stderr),
+                    )
                 } catch (e: CancellationException) {
                     if (!currentCoroutineContext().isActive) throw e
                     Logger.me.w("Root lifecycle handling cancelled", e)
@@ -131,19 +129,19 @@ internal class RootProcessHandle(
     companion object {
         suspend fun awaitRootStartup(
             rootServiceConnected: Job,
-            ownershipAccepted: Deferred<Unit>,
+            ownershipAccepted: Deferred<Credentials>,
             startupStdioClosed: Deferred<Unit>,
             awaitFailureExit: suspend () -> Int,
-        ) {
-            select {
-                ownershipAccepted.onAwait { }
+        ): Credentials {
+            val peerCredentials = select<Credentials> {
+                ownershipAccepted.onAwait { it }
                 startupStdioClosed.onAwait {
                     val exitCode = awaitFailureExit()
                     throw IOException(
                         "Root process stdout/stderr closed before ownership accepted with exit code $exitCode")
                 }
             }
-            select {
+            select<Unit> {
                 rootServiceConnected.onJoin { }
                 startupStdioClosed.onAwait {
                     val exitCode = awaitFailureExit()
@@ -153,6 +151,7 @@ internal class RootProcessHandle(
             }
             currentCoroutineContext().ensureActive()
             if (rootServiceConnected.isCancelled) rootServiceConnected.ensureActive()
+            return peerCredentials
         }
     }
 }

@@ -1,5 +1,6 @@
 package be.mygod.librootkotlinx.impl
 
+import android.net.Credentials
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Deferred
@@ -20,7 +21,7 @@ class RootProcessHandleTest {
     @Test
     fun startupStdioClosedBeforeOwnershipFailsStartup() = runTest {
         supervisorScope {
-            val ownershipAccepted = CompletableDeferred<Unit>()
+            val ownershipAccepted = CompletableDeferred<Credentials>()
             val startupStdioClosed = CompletableDeferred<Unit>()
             val startup = async {
                 RootProcessHandle.awaitRootStartup(Job(), ownershipAccepted, startupStdioClosed) { 9 }
@@ -39,13 +40,13 @@ class RootProcessHandleTest {
     @Test
     fun startupStdioClosedBeforeConnectionFailsStartup() = runTest {
         supervisorScope {
-            val ownershipAccepted = CompletableDeferred<Unit>()
+            val ownershipAccepted = CompletableDeferred<Credentials>()
             val startupStdioClosed = CompletableDeferred<Unit>()
             val startup = async {
                 RootProcessHandle.awaitRootStartup(Job(), ownershipAccepted, startupStdioClosed) { 7 }
             }
 
-            ownershipAccepted.complete(Unit)
+            ownershipAccepted.complete(Credentials(123, 0, 0))
             runCurrent()
             startupStdioClosed.complete(Unit)
 
@@ -60,8 +61,9 @@ class RootProcessHandleTest {
     fun connectionCompletingAfterOwnershipCompletesStartup() = runTest {
         supervisorScope {
             val rootServiceConnected = Job()
-            val ownershipAccepted = CompletableDeferred<Unit>()
+            val ownershipAccepted = CompletableDeferred<Credentials>()
             val startupStdioClosed = CompletableDeferred<Unit>()
+            val credentials = Credentials(123, 0, 0)
             var awaitFailureExitCalls = 0
             val startup = async {
                 RootProcessHandle.awaitRootStartup(rootServiceConnected, ownershipAccepted, startupStdioClosed) {
@@ -69,11 +71,11 @@ class RootProcessHandleTest {
                 }
             }
 
-            ownershipAccepted.complete(Unit)
+            ownershipAccepted.complete(credentials)
             runCurrent()
             rootServiceConnected.complete()
 
-            startup.await()
+            assertEquals(credentials, startup.await())
             assertEquals(0, awaitFailureExitCalls)
         }
     }
@@ -82,7 +84,7 @@ class RootProcessHandleTest {
     fun cancelledConnectionCancelsStartupAfterOwnership() = runTest {
         supervisorScope {
             val rootServiceConnected = Job().also { it.cancel(CancellationException("server closed")) }
-            val ownershipAccepted = CompletableDeferred<Unit>()
+            val ownershipAccepted = CompletableDeferred<Credentials>()
             val startupStdioClosed = CompletableDeferred<Unit>()
             var awaitFailureExitCalls = 0
             val startup = async {
@@ -91,14 +93,14 @@ class RootProcessHandleTest {
                 }
             }
 
-            ownershipAccepted.complete(Unit)
+            ownershipAccepted.complete(Credentials(123, 0, 0))
 
             assertEquals("server closed", awaitCancellation(startup).message)
             assertEquals(0, awaitFailureExitCalls)
         }
     }
 
-    private suspend fun awaitIOException(startup: Deferred<Unit>) = try {
+    private suspend fun awaitIOException(startup: Deferred<*>) = try {
         startup.await()
         fail("Expected startup failure")
         throw AssertionError()
@@ -106,7 +108,7 @@ class RootProcessHandleTest {
         e
     }
 
-    private suspend fun awaitCancellation(startup: Deferred<Unit>): CancellationException = try {
+    private suspend fun awaitCancellation(startup: Deferred<*>): CancellationException = try {
         startup.await()
         fail("Expected startup cancellation")
         throw AssertionError()

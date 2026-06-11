@@ -4,9 +4,9 @@ import android.content.Context
 import android.os.Build
 import android.os.DeadObjectException
 import android.os.IBinder
-import android.os.ParcelFileDescriptor
 import android.os.RemoteException
 import be.mygod.librootkotlinx.Logger
+import be.mygod.librootkotlinx.RootProcess
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -23,12 +23,7 @@ internal class RootServiceConnection(
     private val context: Context,
     private val niceName: String,
     private val deathRecipient: IBinder.DeathRecipient,
-    private val handleRootLifecycle: suspend (
-        Process,
-        ParcelFileDescriptor,
-        ParcelFileDescriptor,
-        ParcelFileDescriptor,
-    ) -> Unit,
+    private val handleRootLifecycle: suspend (RootProcess) -> Unit,
     private val rootLifecycleCoroutineContext: CoroutineContext,
     private val canStartRootProcess: () -> Boolean,
     private val onConnected: (Connected) -> Boolean,

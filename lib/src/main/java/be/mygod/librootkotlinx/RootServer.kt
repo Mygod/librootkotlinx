@@ -3,7 +3,6 @@ package be.mygod.librootkotlinx
 import android.content.Context
 import android.os.IBinder
 import android.os.Parcelable
-import android.os.ParcelFileDescriptor
 import android.os.RemoteException
 import be.mygod.librootkotlinx.impl.IRootCommandCallback
 import be.mygod.librootkotlinx.impl.IRootCommandService
@@ -100,12 +99,7 @@ class RootServer internal constructor() {
         context: Context,
         niceName: String,
         rootLifecycleCoroutineContext: CoroutineContext,
-        handleRootLifecycle: suspend (
-            Process,
-            ParcelFileDescriptor,
-            ParcelFileDescriptor,
-            ParcelFileDescriptor,
-        ) -> Unit,
+        handleRootLifecycle: suspend (RootProcess) -> Unit,
     ) {
         synchronized(lifecycleLock) {
             require(!lifecycleStarted && closeCause == null) { "RootServer is already initialized or closed" }
@@ -214,12 +208,7 @@ class RootServer internal constructor() {
         context: Context,
         niceName: String,
         rootLifecycleCoroutineContext: CoroutineContext,
-        handleRootLifecycle: suspend (
-            Process,
-            ParcelFileDescriptor,
-            ParcelFileDescriptor,
-            ParcelFileDescriptor,
-        ) -> Unit,
+        handleRootLifecycle: suspend (RootProcess) -> Unit,
     ) {
         try {
             RootServiceConnection(

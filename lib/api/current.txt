@@ -282,6 +282,19 @@ package be.mygod.librootkotlinx {
     method @MainThread public kotlinx.coroutines.flow.Flow<T> flow();
   }
 
+  public final class RootProcess {
+    method @InaccessibleFromKotlin public android.net.Credentials getPeerCredentials();
+    method @InaccessibleFromKotlin public Process getProcess();
+    method @InaccessibleFromKotlin public android.os.ParcelFileDescriptor getStderr();
+    method @InaccessibleFromKotlin public android.os.ParcelFileDescriptor getStdin();
+    method @InaccessibleFromKotlin public android.os.ParcelFileDescriptor getStdout();
+    property public android.net.Credentials peerCredentials;
+    property public Process process;
+    property public android.os.ParcelFileDescriptor stderr;
+    property public android.os.ParcelFileDescriptor stdin;
+    property public android.os.ParcelFileDescriptor stdout;
+  }
+
   public final class RootServer {
     method public suspend Object? close(kotlin.coroutines.Continuation<? super kotlin.Unit>);
     method @kotlin.jvm.Throws(exceptionClasses=RemoteException::class) public suspend <T extends android.os.Parcelable> Object? execute(be.mygod.librootkotlinx.RootCommand<T> command, ClassLoader? classLoader, kotlin.coroutines.Continuation<? super T>) throws android.os.RemoteException;
@@ -305,7 +318,7 @@ package be.mygod.librootkotlinx {
     method @InaccessibleFromKotlin protected String getNiceName();
     method @InaccessibleFromKotlin protected kotlin.coroutines.CoroutineContext getRootLifecycleCoroutineContext();
     method @InaccessibleFromKotlin protected kotlinx.coroutines.CoroutineDispatcher getTimeoutDispatcher();
-    method protected suspend Object? handleRootLifecycle(Process process, android.os.ParcelFileDescriptor stdin, android.os.ParcelFileDescriptor stdout, android.os.ParcelFileDescriptor stderr, kotlin.coroutines.Continuation<? super kotlin.Unit>);
+    method protected suspend Object? handleRootLifecycle(be.mygod.librootkotlinx.RootProcess rootProcess, kotlin.coroutines.Continuation<? super kotlin.Unit>);
     method @CallSuper protected suspend Object? initServer(be.mygod.librootkotlinx.RootServer server, kotlin.coroutines.Continuation<? super kotlin.Unit>);
     method public final suspend Object? release(be.mygod.librootkotlinx.RootServer server, kotlin.coroutines.Continuation<? super kotlin.Unit>);
     method @kotlin.jvm.Throws(exceptionClasses=NoShellException::class) public final suspend inline <T> Object? use(kotlin.jvm.functions.Function1<? super be.mygod.librootkotlinx.RootServer,? extends T> block, kotlin.coroutines.Continuation<? super T>) throws be.mygod.librootkotlinx.NoShellException;
