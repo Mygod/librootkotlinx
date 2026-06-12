@@ -3,6 +3,7 @@ package be.mygod.librootkotlinx.impl
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.res.Resources
+import android.os.Build
 import android.os.Looper
 import android.os.UserHandle
 import kotlinx.coroutines.CoroutineScope
@@ -67,7 +68,12 @@ internal object RootProcessBootstrap {
         return try {
             val userHandle = try {
                 UserHandle::class.java.getDeclaredMethod("of", Integer.TYPE)(null, userId)
-            } catch (_: NoSuchMethodException) {
+            } catch (e: NoSuchMethodException) {
+                if (Build.VERSION.SDK_INT >= 24) {
+                    System.err.println("Unexpected UserHandle.of method missing")
+                    e.printStackTrace()
+                    System.err.flush()
+                }
                 UserHandle::class.java.getDeclaredConstructor(Integer.TYPE).newInstance(userId)
             }
             systemContext.javaClass.getDeclaredMethod("createPackageContextAsUser", String::class.java, Integer.TYPE,
