@@ -1,6 +1,6 @@
 # librootkotlinx
 
-[![Android 6-16.1](https://img.shields.io/badge/Android-6--16.1-3DDC84?logo=android&logoColor=white)](lib/build.gradle.kts)
+[![Android 6-17](https://img.shields.io/badge/Android-6--17-3DDC84?logo=android&logoColor=white)](lib/build.gradle.kts)
 ![Downloads](https://api.scarf.sh/v2/packages/Mygod/c30a76a0-1b1f-4605-a6ff-38c5198e574c/downloads-badge)
 ![Commercial users](https://api.scarf.sh/v2/packages/Mygod/c30a76a0-1b1f-4605-a6ff-38c5198e574c/commercial-users-badge)
 
@@ -140,9 +140,11 @@ Other:
 * `RootProcessBootstrap` starts from the base APK classpath, then asks the framework-created package context for the
   app class loader. That lets Android assemble base app code and native library paths through the normal package-loading
   path instead of duplicating `LoadedApk.makePaths(...)`.
-  The root side does not support code or Parcelables packaged in split APKs or dynamic feature modules. Consumers must
-  package `librootkotlinx` and every `RootCommand`, `RootFlow`, `Parcelable`, exception class, and dependency that may
-  be loaded or unparceled in the root process in the base APK. This includes both ordinary and isolated feature splits.
+  Android includes ordinary split APK code in that package class loader unless the app requests isolated split loading.
+  The root side does not support code or Parcelables packaged behind isolated split loading or on-demand dynamic feature
+  modules. Consumers must package `librootkotlinx` and every `RootCommand`, `RootFlow`, `Parcelable`, exception class,
+  and dependency that may be loaded or unparceled in the root process in the base APK or an always-installed
+  non-isolated split.
 
 System/root command assumptions:
 
