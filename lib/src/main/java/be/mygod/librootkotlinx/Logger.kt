@@ -21,6 +21,9 @@ interface Logger {
     fun i(m: String?, t: Throwable? = null) {
         Log.i(TAG, m, t)
     }
+    fun onRootUncaughtException(thread: Thread, t: Throwable) {
+        e("Uncaught exception on root thread ${thread.name}", t)
+    }
     fun w(m: String?, t: Throwable? = null) {
         Log.w(TAG, m, t)
     }

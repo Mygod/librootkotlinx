@@ -2,6 +2,7 @@ package be.mygod.librootkotlinx.impl
 
 import android.content.Context
 import android.os.Looper
+import be.mygod.librootkotlinx.Logger
 import be.mygod.librootkotlinx.systemContext
 
 /**
@@ -14,6 +15,14 @@ import be.mygod.librootkotlinx.systemContext
 internal object RootProcessMain {
     @JvmStatic
     fun main(context: Context, userId: Int, authority: String, token: String) {
+        val previousUncaughtExceptionHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            try {
+                Logger.me.onRootUncaughtException(thread, throwable)
+            } finally {
+                previousUncaughtExceptionHandler?.uncaughtException(thread, throwable)
+            }
+        }
         systemContext = context
         val service = RootCommandService(Looper.myLooper()!!::quitSafely)
         if (!RootServiceHandoffClient.handoff(context, authority, token, service.asBinder(), userId)) {

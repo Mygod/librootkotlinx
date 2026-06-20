@@ -6,6 +6,7 @@ package be.mygod.librootkotlinx {
     method public default void e(String? m, optional Throwable? t);
     method @InaccessibleFromKotlin public static be.mygod.librootkotlinx.Logger getMe();
     method public default void i(String? m, optional Throwable? t);
+    method public default void onRootUncaughtException(Thread thread, Throwable t);
     method @InaccessibleFromKotlin public static void setMe(be.mygod.librootkotlinx.Logger);
     method public default void w(String? m, optional Throwable? t);
     field public static final be.mygod.librootkotlinx.Logger.Companion Companion;
