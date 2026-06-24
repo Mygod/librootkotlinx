@@ -38,7 +38,7 @@ metalava {
 
 dependencies {
     api("androidx.collection:collection:1.6.0")
-    api("io.ktor:ktor-io-jvm:3.4.3")
+    api("io.ktor:ktor-io-jvm:3.5.0")
     api("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
