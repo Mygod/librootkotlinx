@@ -4,11 +4,17 @@ import android.content.Context
 import android.os.Build
 import android.os.Debug
 import android.system.Os
+import be.mygod.librootkotlinx.Logger
 import kotlinx.coroutines.DEBUG_PROPERTY_NAME
 import java.io.File
 
 internal object AppProcess {
-    val myExe get() = "/proc/${Os.getpid()}/exe"
+    val myExe get() = try {
+        File("/proc/self/exe").canonicalPath.also { require(!it.startsWith("/proc/")) { it } }
+    } catch (e: Exception) {
+        Logger.me.w("warning: couldn't resolve self exe", e)
+        "/proc/${Os.getpid()}/exe"
+    }
 
     /**
      * Mirrors libsu's Android Studio startup-agent warning probe. Optimized consumer builds strip this diagnostic path.
