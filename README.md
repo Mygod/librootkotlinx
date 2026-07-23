@@ -7,8 +7,9 @@
 Run rooted Kotlin JVM code made super easy with coroutines and parcelize!
 Check out demo at `app` to see just how easy it is.
 Also check out more complicated demos:
-* [PoGo+LE](https://github.com/Mygod/pogoplusle)
+* [PoGo+LE v1.4.0 or earlier](https://github.com/Mygod/pogoplusle/tree/v1.4.0)
 * [VPN Hotspot](https://github.com/Mygod/VPNHotspot) (how this library started)
+* [blocker](https://github.com/lihenggui/blocker)
 
 Use it now!
 `be.mygod.librootkotlinx:librootkotlinx:2.0.0+`
