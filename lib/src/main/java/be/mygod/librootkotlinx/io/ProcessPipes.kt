@@ -190,7 +190,7 @@ suspend fun Process.awaitExit(): Int {
     } catch (e: CancellationException) {
         throw e
     } catch (e: Exception) {
-        Logger.me.i("Failed to nonblocking awaitExit", e)
+        if (Build.VERSION.SDK_INT >= 35) Logger.me.i("Failed to nonblocking awaitExit", e)
     }
     try {
         return exitValue()
