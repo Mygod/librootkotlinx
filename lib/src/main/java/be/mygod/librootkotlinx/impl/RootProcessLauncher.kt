@@ -42,6 +42,7 @@ internal class RootProcessLauncher(
     private val handoffToken: String,
 ) {
     suspend fun launch(marker: RootProcessStartupMarker): RootProcessPipes {
+        val shouldRelocate = Build.VERSION.SDK_INT < 26
         val pipes = executeRootShell(
             buildStartupCommand(
                 packageName = packageName,
@@ -51,9 +52,9 @@ internal class RootProcessLauncher(
                 ownershipSocketName = ownershipSocketName,
                 handoffAuthority = handoffAuthority,
                 handoffToken = handoffToken,
-                appProcess = AppProcess.myExe,
-                shouldRelocate = Build.VERSION.SDK_INT < 26,
-                relocationToken = if (Build.VERSION.SDK_INT < 26) relocationToken() else "",
+                appProcess = if (shouldRelocate) null else AppProcess.myExe,
+                shouldRelocate = shouldRelocate,
+                relocationToken = if (shouldRelocate) relocationToken() else "",
             ),
         )
         try {
@@ -168,30 +169,40 @@ internal class RootProcessLauncher(
             ownershipSocketName: String,
             handoffAuthority: String,
             handoffToken: String,
-            appProcess: String,
+            appProcess: String?,
             shouldRelocate: Boolean,
             relocationToken: String,
         ): String {
             val (relocationScript, executable) = if (shouldRelocate) {
                 AppProcess.relocateScript(relocationToken)
             } else "" to appProcess
+            val resolveInRoot = executable == null
+            val appProcessCommand = executable ?: "\"${'$'}app_process_path\""
             val userId = android.os.Process.myUid() / 100000    // PER_USER_RANGE
             val launch = AppProcess.launchString(
                 packageCodePath = packageCodePath,
                 clazz = RootProcessBootstrap::class.java.name,
-                appProcess = executable,
+                appProcess = appProcessCommand,
                 niceName = niceName,
             )
             val phhLaunch = AppProcess.launchString(
                 packageCodePath = packageCodePath,
                 clazz = RootProcessBootstrap::class.java.name,
-                appProcess = "runcon u:r:su:s0 ${AppProcess.quote(executable)}",
+                appProcess = "runcon u:r:su:s0 ${if (resolveInRoot) appProcessCommand else AppProcess.quote(appProcessCommand)}",
                 niceName = niceName,
             )
             val args = " $packageName $userId $ownershipSocketName $handoffAuthority $handoffToken"
             return buildString {
                 appendLine("exec 3>$markerPath || exit 1")
                 append(relocationScript)
+                if (resolveInRoot) {
+                    appendLine("app_process_path=\"$(/system/bin/readlink -f ${AppProcess.quote(AppProcess.procPath)})\" || exit 1")
+                    appendLine("case \"${'$'}app_process_path\" in")
+                    appendLine("  /proc|/proc/*|'') exit 1 ;;")
+                    appendLine("  /*) ;;")
+                    appendLine("  *) exit 1 ;;")
+                    appendLine("esac")
+                }
                 // PHH Superuser starts commands in phhsu_daemon, which blocks app-to-root Binder; see:
                 // https://github.com/Mygod/VPNHotspot/issues/753
                 appendLine("if [ \"$(id -Z 2>/dev/null)\" = \"u:r:phhsu_daemon:s0\" ] && runcon u:r:su:s0 true 2>/dev/null; then")

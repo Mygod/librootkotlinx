@@ -153,5 +153,5 @@ The following Android system binaries or shell commands are assumed to be bundle
 
 * `/system/bin/su`, `/system/xbin/su`, `/sbin/su`, `/debug_ramdisk/su`, `/data/adb/ksu/bin/su`,
   `/data/adb/ap/bin/su`, or `su`;
-* `/system/bin/app_process` as the fallback root `app_process` executable in case discovery fails;
+* `/system/bin/readlink -f` on API 26+ when root must finish resolving the app's `app_process` path;
 * `mkdir`, `cp`, `chmod`, `printf`, and shell `exec`.

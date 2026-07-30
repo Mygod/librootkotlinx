@@ -7,14 +7,22 @@ import android.system.Os
 import be.mygod.librootkotlinx.Logger
 import kotlinx.coroutines.DEBUG_PROPERTY_NAME
 import java.io.File
+import java.io.IOException
 
 internal object AppProcess {
-    val myExe get() = try {
-        File("/proc/self/exe").canonicalPath.also { require(!it.startsWith("/proc/")) { it } }
-    } catch (e: Exception) {
-        Logger.me.w("warning: couldn't resolve self exe", e)
-        "/proc/${Os.getpid()}/exe"
+    val myExe: String? get() {
+        val resolved = try {
+            File("/proc/self/exe").canonicalPath
+        } catch (e: IOException) {
+            Logger.me.d("warning: couldn't resolve self exe", e)
+            null
+        }
+        if (resolved != null && !resolved.startsWith("/proc/")) return resolved
+        if (resolved != null) Logger.me.d("warning: couldn't resolve self exe: $resolved")
+        return null
     }
+
+    val procPath get() = "/proc/${Os.getpid()}/exe"
 
     /**
      * Mirrors libsu's Android Studio startup-agent warning probe. Optimized consumer builds strip this diagnostic path.
@@ -29,10 +37,11 @@ internal object AppProcess {
      * app_process relocation workaround for Samsung/old-Android exec failures.
      * This stays API 23-25; modern Android app_process normally lives outside /data, and the API 29+
      * APEX/linker-config relocation path is not worth owning without a realistic trigger.
+     * The procfs link is only the copy source; the root shell executes the relocated path.
      */
     fun relocateScript(token: String): Pair<String, String> {
         val relocated = "/dev/app_process_$token"
-        return "[ -f $relocated ] || { cp $myExe $relocated && chmod 700 $relocated; } || exit 1\n" to relocated
+        return "[ -f $relocated ] || { cp $procPath $relocated && chmod 700 $relocated; } || exit 1\n" to relocated
     }
 
     /**
