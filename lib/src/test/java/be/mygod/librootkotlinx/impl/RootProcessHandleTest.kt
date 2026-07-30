@@ -58,6 +58,45 @@ class RootProcessHandleTest {
     }
 
     @Test
+    fun controlledExitBeforeOwnershipIncludesFailureDescription() = runTest {
+        supervisorScope {
+            val ownershipAccepted = CompletableDeferred<Credentials>()
+            val processExited = CompletableDeferred<Int>()
+            val startup = async {
+                RootProcessHandle.awaitRootStartup(Job(), ownershipAccepted, processExited) { "" }
+            }
+
+            runCurrent()
+            processExited.complete(RootProcessExit.OWNERSHIP_CONNECTION_FAILED.code)
+
+            assertEquals(
+                "Root process exited with code 106 (ownership connection failed) before ownership accepted",
+                awaitIOException(startup).message,
+            )
+        }
+    }
+
+    @Test
+    fun controlledExitBeforeConnectionIncludesFailureDescription() = runTest {
+        supervisorScope {
+            val ownershipAccepted = CompletableDeferred<Credentials>()
+            val processExited = CompletableDeferred<Int>()
+            val startup = async {
+                RootProcessHandle.awaitRootStartup(Job(), ownershipAccepted, processExited) { "" }
+            }
+
+            ownershipAccepted.complete(Credentials(123, 0, 0))
+            runCurrent()
+            processExited.complete(RootProcessExit.ROOT_MAIN_RETURNED.code)
+
+            assertEquals(
+                "Root process exited with code 107 (root main returned) before root service connected",
+                awaitIOException(startup).message,
+            )
+        }
+    }
+
+    @Test
     fun connectionCompletingAfterOwnershipCompletesStartup() = runTest {
         supervisorScope {
             val rootServiceConnected = Job()

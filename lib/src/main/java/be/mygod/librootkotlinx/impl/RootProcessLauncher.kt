@@ -60,33 +60,39 @@ internal class RootProcessLauncher(
         try {
             val channel = marker.openMarkerReadChannel()
             try {
-                val line = coroutineScope {
-                    val markerLine = async { channel.readLine() }
-                    val exited = async { pipes.process.awaitExit() }
-                    try {
-                        select {
-                            markerLine.onAwait { it }
-                            exited.onAwait { code ->
-                                // The shell can write no more after exiting, so closing the last marker write end
-                                // settles the marker read deterministically.
-                                marker.closeMarkerWrite()
-                                markerLine.await() ?: throw NoShellException(
-                                    "Root shell exited unexpectedly with code $code${pipes.diagnosticsSuffix()}")
+                var exitedCode: Int? = null
+                val markerLine: String? = try {
+                    coroutineScope {
+                        val markerLine = async { channel.readLine() }
+                        val exited = async { pipes.process.awaitExit() }
+                        try {
+                            select<String?> {
+                                markerLine.onAwait { it }
+                                exited.onAwait { code ->
+                                    exitedCode = code
+                                    // The shell can write no more after exiting, so closing the last marker write end
+                                    // settles the marker read deterministically.
+                                    marker.closeMarkerWrite()
+                                    markerLine.await()
+                                }
                             }
+                        } finally {
+                            markerLine.cancelAndJoin()
+                            exited.cancelAndJoin()
                         }
-                    } finally {
-                        markerLine.cancelAndJoin()
-                        exited.cancelAndJoin()
                     }
+                } catch (e: IOException) {
+                    throw NoShellException("Root service startup marker read failed", e)
                 }
-                when (line) {
-                    STARTUP_MARKER_STARTED -> { }
-                    null -> throw NoShellException("Root shell marker pipe closed${pipes.diagnosticsSuffix()}")
-                    else -> throw NoShellException(
-                        "Unexpected root shell startup marker: $line${pipes.diagnosticsSuffix()}")
+                if (markerLine == null && exitedCode != null) {
+                    throw startupExitFailure(exitedCode, pipes.diagnosticsSuffix())
                 }
-            } catch (e: IOException) {
-                throw NoShellException("Root service startup marker read failed", e)
+                when {
+                    markerLine == null -> throw NoShellException(
+                        "Root shell marker pipe closed${pipes.diagnosticsSuffix()}")
+                    else -> parseStartupShellPid(markerLine)?.let(pipes::markStarted) ?: throw NoShellException(
+                        "Unexpected root shell startup marker: $markerLine${pipes.diagnosticsSuffix()}")
+                }
             } finally {
                 marker.closeMarkerWrite()
                 channel.cancel(null)
@@ -160,6 +166,21 @@ internal class RootProcessLauncher(
             "su",
         )
         private const val STARTUP_MARKER_STARTED = "librootkotlinx-started"
+        private const val STARTUP_MARKER_PREFIX = "$STARTUP_MARKER_STARTED:"
+
+        fun startupExitFailure(code: Int, diagnosticsSuffix: String): Exception {
+            val failure = RootProcessExit.fromCode(code, RootProcessExit.Phase.BEFORE_STARTUP_MARKER)
+                ?: return NoShellException("Root shell exited unexpectedly with code $code$diagnosticsSuffix")
+            return IOException("Root process exited with code $code (${failure.description}) before startup marker" +
+                    diagnosticsSuffix)
+        }
+
+        fun parseStartupShellPid(line: String): Int? {
+            if (!line.startsWith(STARTUP_MARKER_PREFIX)) return null
+            val pid = line.substring(STARTUP_MARKER_PREFIX.length)
+            if (pid.isEmpty() || pid.first() == '0' || pid.any { it !in '0'..'9' }) return null
+            return pid.toIntOrNull()
+        }
 
         fun buildStartupCommand(
             packageName: String,
@@ -193,14 +214,21 @@ internal class RootProcessLauncher(
             )
             val args = " $packageName $userId $ownershipSocketName $handoffAuthority $handoffToken"
             return buildString {
-                appendLine("exec 3>$markerPath || exit 1")
+                // command removes exec's special-builtin failure semantics, so a redirection error reaches the handler.
+                appendLine("command exec 3>$markerPath || " +
+                        RootProcessExit.STARTUP_MARKER_OPEN_FAILED.shellFailureCommand)
                 append(relocationScript)
                 if (resolveInRoot) {
-                    appendLine("app_process_path=\"$(/system/bin/readlink -f ${AppProcess.quote(AppProcess.procPath)})\" || exit 1")
+                    appendLine("app_process_path=\"$(/system/bin/readlink -f " +
+                            "${AppProcess.quote(AppProcess.procPath)})\" || " +
+                            RootProcessExit.APP_PROCESS_RESOLUTION_FAILED.shellFailureCommand)
+                    val invalidPath = RootProcessExit.APP_PROCESS_PATH_INVALID
                     appendLine("case \"${'$'}app_process_path\" in")
-                    appendLine("  /proc|/proc/*|'') exit 1 ;;")
+                    appendLine("  /proc|/proc/*|'') printf 'librootkotlinx: ${invalidPath.description}: %s\\n' " +
+                            "\"${'$'}app_process_path\" >&2; exit ${invalidPath.code} ;;")
                     appendLine("  /*) ;;")
-                    appendLine("  *) exit 1 ;;")
+                    appendLine("  *) printf 'librootkotlinx: ${invalidPath.description}: %s\\n' " +
+                            "\"${'$'}app_process_path\" >&2; exit ${invalidPath.code} ;;")
                     appendLine("esac")
                 }
                 // PHH Superuser starts commands in phhsu_daemon, which blocks app-to-root Binder; see:
@@ -208,7 +236,8 @@ internal class RootProcessLauncher(
                 appendLine("if [ \"$(id -Z 2>/dev/null)\" = \"u:r:phhsu_daemon:s0\" ] && runcon u:r:su:s0 true 2>/dev/null; then")
                 appendLine("  phh_runcon=1")
                 appendLine("fi")
-                appendLine("printf '%s\\n' $STARTUP_MARKER_STARTED >&3 || exit 1")
+                appendLine("printf '%s:%s\\n' $STARTUP_MARKER_STARTED \"${'$'}${'$'}\" >&3 || " +
+                        RootProcessExit.STARTUP_MARKER_WRITE_FAILED.shellFailureCommand)
                 appendLine("exec 3>&-")
                 appendLine($$"if [ \"$phh_runcon\" = 1 ]; then")
                 appendLine("  $phhLaunch$args")

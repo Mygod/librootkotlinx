@@ -3,6 +3,7 @@ package be.mygod.librootkotlinx.impl
 import android.system.ErrnoException
 import be.mygod.librootkotlinx.Logger
 import be.mygod.librootkotlinx.io.FileDescriptorByteReadChannel
+import be.mygod.librootkotlinx.io.pid
 import io.ktor.utils.io.ByteWriteChannel
 import io.ktor.utils.io.availableForRead
 import io.ktor.utils.io.readByteArray
@@ -23,6 +24,14 @@ internal class RootProcessPipes(
     val stdout: FileDescriptorByteReadChannel,
     val stderr: FileDescriptorByteReadChannel,
 ) {
+    // This shell writes the startup marker immediately before exec, which preserves its PID for app_process.
+    private var startupShellPid: Int? = null
+
+    fun markStarted(shellPid: Int) {
+        check(startupShellPid == null) { "Root process startup was already marked" }
+        startupShellPid = shellPid
+    }
+
     /**
      * Consumes buffered stdout/stderr into a failure message suffix, or "" if there was no output.
      *
@@ -30,11 +39,20 @@ internal class RootProcessPipes(
      * captures everything; for a still-live writer this is a best-effort snapshot.
      */
     suspend fun diagnosticsSuffix(): String {
+        val processIdentity = startupShellPid?.let { shellPid ->
+            val localPid = try {
+                process.pid.toString()
+            } catch (e: Exception) {
+                Logger.me.d("Failed to read local root process PID", e)
+                "unknown"
+            }
+            " [localPid=$localPid, shellPid=$shellPid]"
+        }.orEmpty()
         val buffer = Buffer()
         stdout.snapshotTo(buffer)
         stderr.snapshotTo(buffer)
         val diagnostics = buffer.readString().trim()
-        return if (diagnostics.isEmpty()) "" else ": $diagnostics"
+        return if (diagnostics.isEmpty()) processIdentity else "$processIdentity: $diagnostics"
     }
 
     private suspend fun FileDescriptorByteReadChannel.snapshotTo(buffer: Buffer) {

@@ -41,7 +41,9 @@ internal object AppProcess {
      */
     fun relocateScript(token: String): Pair<String, String> {
         val relocated = "/dev/app_process_$token"
-        return "[ -f $relocated ] || { cp $procPath $relocated && chmod 700 $relocated; } || exit 1\n" to relocated
+        val failure = RootProcessExit.APP_PROCESS_RELOCATION_FAILED
+        return "[ -f $relocated ] || { cp $procPath $relocated && chmod 700 $relocated; } || " +
+                "${failure.shellFailureCommand}\n" to relocated
     }
 
     /**

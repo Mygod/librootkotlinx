@@ -94,7 +94,7 @@ internal class RootProcessOwnership : Closeable {
             Logger.me.e("Failed to connect root process ownership socket", e)
             e.printStackTrace()
             System.err.flush()
-            exitProcess(1)
+            exitProcess(RootProcessExit.OWNERSHIP_CONNECTION_FAILED.code)
         }
 
         fun monitorRootProcess(socket: LocalSocket, scope: CoroutineScope) {

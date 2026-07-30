@@ -99,15 +99,25 @@ internal class RootProcessHandle(
             val peerCredentials = select {
                 ownershipAccepted.onAwait { it }
                 processExited.onAwait { code ->
+                    val description = RootProcessExit.fromCode(
+                        code,
+                        RootProcessExit.Phase.AFTER_STARTUP_MARKER,
+                    )?.let { " (${it.description})" }.orEmpty()
                     throw IOException(
-                        "Root process exited with code $code before ownership accepted${diagnosticsSuffix()}")
+                        "Root process exited with code $code$description before ownership accepted" +
+                                diagnosticsSuffix())
                 }
             }
             select {
                 rootServiceConnected.onJoin { }
                 processExited.onAwait { code ->
+                    val description = RootProcessExit.fromCode(
+                        code,
+                        RootProcessExit.Phase.AFTER_STARTUP_MARKER,
+                    )?.let { " (${it.description})" }.orEmpty()
                     throw IOException(
-                        "Root process exited with code $code before root service connected${diagnosticsSuffix()}")
+                        "Root process exited with code $code$description before root service connected" +
+                                diagnosticsSuffix())
                 }
             }
             currentCoroutineContext().ensureActive()

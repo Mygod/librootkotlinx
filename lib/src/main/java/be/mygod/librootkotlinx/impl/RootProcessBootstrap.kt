@@ -26,7 +26,7 @@ internal object RootProcessBootstrap {
             System.err.println(
                 "RootProcessBootstrap requires package, uid, ownership socket, handoff authority and token arguments")
             System.err.flush()
-            exitProcess(1)
+            exitProcess(RootProcessExit.BOOTSTRAP_ARGUMENTS_INVALID.code)
         }
         val ownership = RootProcessOwnership.connectFromRootProcess(args[2])
         @Suppress("DEPRECATION") Looper.prepareMainLooper()
@@ -48,7 +48,9 @@ internal object RootProcessBootstrap {
         } finally {
             processJob.cancel()
         }
-        exitProcess(1)
+        System.err.println("RootProcessMain returned")
+        System.err.flush()
+        exitProcess(RootProcessExit.ROOT_MAIN_RETURNED.code)
     }
 
     private const val CONTEXT_FLAGS = Context.CONTEXT_INCLUDE_CODE or Context.CONTEXT_IGNORE_SECURITY

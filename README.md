@@ -79,7 +79,7 @@ Greylisted/blacklisted APIs or internal constants: (some constants are hardcoded
 
 </details>
 
-Optional hidden APIs used only for nonblocking optimization/optional helper methods:
+Optional hidden APIs used only on opt-in or best-effort paths:
 
 * (API 31+) `Landroid/os/Process;->openPidFd(II)Ljava/io/FileDescriptor;,blocked`
 * (API 24+) `Ljava/lang/UNIXProcess;->pid:I,unsupported`
